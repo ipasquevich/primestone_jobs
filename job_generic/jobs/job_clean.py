@@ -1,9 +1,8 @@
-
 import json
 import random
 from pyspark.sql import SparkSession, DataFrame, Row
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
-from pyspark.sql.functions import *
+from pyspark.sql.functions import lit, udf, struct, col, concat, explode
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
@@ -32,14 +31,13 @@ def cleaner(union, spark):
         # extraigo los atributos y los guardo en variables
         for item in req_config["configPastFutureDays"]:
                 if item['type'] == 'LP':
-                        LP_futuro = item['future']
-                        LP_pasado = item['past']
+                        lp_futuro = item['future']
+                        lp_pasado = item['past']
                 else:
-                        RE_futuro = item['future']
-                        RE_pasado = item['past']
+                        re_futuro = item['future']
+                        re_pasado = item['past']
 
         ceros = req_config["withNullsOrCero"]["withCeros"]
-        nulos = req_config["withNullsOrCero"]['withNull']
 
         lista_apagon = req_config["QualityCode"]["PowerOutage"]
 
@@ -94,9 +92,9 @@ def cleaner(union, spark):
                                 last_date = asoc
 
                         if row.readingType == "LOAD PROFILE READING":
-                                return (last_date - timedelta(days=LP_pasado)) <= reading_time <= (hoy + timedelta(days=LP_futuro))
+                                return (last_date - timedelta(days=lp_pasado)) <= reading_time <= (hoy + timedelta(days=lp_futuro))
                         else:
-                                return (last_date - timedelta(days=RE_pasado)) <= reading_time <= (hoy + timedelta(days=RE_futuro))
+                                return (last_date - timedelta(days=re_pasado)) <= reading_time <= (hoy + timedelta(days=re_futuro))
 
 
 
@@ -195,11 +193,11 @@ def cleaner(union, spark):
 
         if check_empty(union.filter(union.readingType == "LOAD PROFILE READING")):
                 # Se trabaja solo para los datos de LOAD PROFILE READING
-                df_LoadProfile = union.filter(union.readingType == "LOAD PROFILE READING")
+                df_load_profile = union.filter(union.readingType == "LOAD PROFILE READING")
                 # Crear columna quality_flag
-                df_LoadProfile = df_LoadProfile.withColumn("quality_flag", concat(col("qualityCodesSystemId"),lit("-"),col("qualityCodesCategorization"),lit("-"),col("qualityCodesIndex")))
+                df_load_profile = df_load_profile.withColumn("quality_flag", concat(col("qualityCodesSystemId"),lit("-"),col("qualityCodesCategorization"),lit("-"),col("qualityCodesIndex")))
 
-                variables_id = df_LoadProfile.select("variableId").distinct().collect()
+                variables_id = df_load_profile.select("variableId").distinct().collect()
                 variables_id = [row.variableId for row in variables_id]
 
 
@@ -242,16 +240,16 @@ def cleaner(union, spark):
                 # aca empieza el ciclo for por cada elemento de la variable variable_Id
                 for iteracion,variable in enumerate(variables_id):
 
-                        df_LP = df_LoadProfile.filter(df_LoadProfile.variableId == variable)
+                        df_lp = df_load_profile.filter(df_load_profile.variableId == variable)
 
                         # obtengo los limites de los tiempos y los paso a timestamp
-                        max_ts = datetime.strptime((df_LP.agg(max('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
-                        min_ts = datetime.strptime((df_LP.agg(min('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
+                        max_ts = datetime.strptime((df_lp.agg(max('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
+                        min_ts = datetime.strptime((df_lp.agg(min('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
                         delta = max_ts - min_ts
 
 
                         # interval indica el intervalo en minutos
-                        interval = df_LP.select("intervalSize").first()[0]
+                        interval = df_lp.select("intervalSize").first()[0]
                         mins = delta.seconds//60
                         lista = [min_ts]
                         for rep in range(1,mins//interval):
@@ -261,7 +259,7 @@ def cleaner(union, spark):
                         all_elem = [fecha.strftime('%Y-%m-%d %H:%M:%S') for fecha in lista]
                         all_elem = ",".join(all_elem)
 
-                        elem = df_LP.select("readingUtcLocalTime").orderBy("readingUtcLocalTime",ascending=True).collect()
+                        elem = df_lp.select("readingUtcLocalTime").orderBy("readingUtcLocalTime",ascending=True).collect()
                         elem = [row.readingUtcLocalTime for row in elem]
 
 
@@ -282,7 +280,7 @@ def cleaner(union, spark):
 
                         # hago un join del df timestamp explodeado con una porcion del df original para obtener un nuevo df que tenga los valores de value y las
                         # quality flags como estan originalmente en las fechas presentes en el df original y si no existen tendran nulo.
-                        df_portion = df_LP.select(col("readingUtcLocalTime").alias("readingUtcLocalTime_ref")
+                        df_portion = df_lp.select(col("readingUtcLocalTime").alias("readingUtcLocalTime_ref")
                                                 ,col("readingLocalTime").alias("readingLocalTime_ref")
                                                 ,col("readingDateSource").alias("readingDateSource_ref")
                                                 ,col("readingsValue").alias("readingsValue_ref")
@@ -302,17 +300,17 @@ def cleaner(union, spark):
 
                         # hago un join del df original con el df timestamp para obtener los datos de los timestamp faltantes en el
                         # df original
-                        df_LP = df_LP.join(df_timestamps, [(df_LP.readingUtcLocalTime == df_timestamps.readingUtcLocalTime_2)]
+                        df_lp = df_lp.join(df_timestamps, [(df_lp.readingUtcLocalTime == df_timestamps.readingUtcLocalTime_2)]
                                                                 ,how = 'inner').coalesce(1)
-                        df_LP = df_LP.drop("readingUtcLocalTime_2")
+                        df_lp = df_lp.drop("readingUtcLocalTime_2")
 
                         # explode de los arrays de la columna 
-                        df_LP = df_LP.withColumn("complete_interval", explode("timestamps_arrays"))
-                        df_LP = df_LP.drop("timestamps_arrays")
+                        df_lp = df_lp.withColumn("complete_interval", explode("timestamps_arrays"))
+                        df_lp = df_lp.drop("timestamps_arrays")
 
 
                         # hago join del df original con el df de referencia, para asi tener los valores consistentes de los campos valor y quality flags
-                        df_LP = df_LP.join(df_reference, [(df_LP.complete_interval == df_reference.complete_interval_ref)]
+                        df_lp = df_lp.join(df_reference, [(df_lp.complete_interval == df_reference.complete_interval_ref)]
                                                                 ,how = 'inner').coalesce(1)
 
 
@@ -327,12 +325,12 @@ def cleaner(union, spark):
 
                         # Create your UDF object (which accepts func_apagon  python function)
                         udf_object = udf(func_apagon, StringType())
-                        df_LP = df_LP.withColumn("readingsValue_ref", udf_object(struct([df_LP[x] for x in df_LP.columns])))
+                        df_lp = df_lp.withColumn("readingsValue_ref", udf_object(struct([df_lp[x] for x in df_lp.columns])))
 
 
                         # Create your UDF object (which accepts func_apagon_intervalos python function)
                         udf_object = udf(func_apagon_intervalos, StringType())
-                        df_LP = df_LP.withColumn("validacion_intervalos", udf_object(struct([df_LP[x] for x in df_LP.columns])))
+                        df_lp = df_lp.withColumn("validacion_intervalos", udf_object(struct([df_lp[x] for x in df_lp.columns])))
 
 
                         # Elimino algunas columnas y renombro otras para mantener el formato de salida esperado
@@ -340,22 +338,22 @@ def cleaner(union, spark):
                         columns_to_drop = ['readingUtcLocalTime_ref', 'complete_interval_ref', 'readingUtcLocalTime', 'readingDateSource',
                                                 'readingLocalTime', "qualityCodesSystemId" ,"qualityCodesCategorization", 'qualityCodesIndex',
                                                 "readingsValue", "referencia" , "quality_flag"]
-                        df_LP = df_LP.drop(*columns_to_drop)
+                        df_lp = df_lp.drop(*columns_to_drop)
 
 
                         if iteracion == 0:
-                                df_LoadProfile_final = df_LP
+                                df_load_profile_final = df_lp
                         else:
-                                df_LoadProfile_final = df_LoadProfile.union(df_LP).coalesce(1)
+                                df_load_profile_final = df_load_profile.union(df_lp).coalesce(1)
 
 
-                df_LoadProfile = df_LoadProfile_final.withColumnRenamed("complete_interval","readingUtcLocalTime").withColumnRenamed("readingLocalTime_ref","readingLocalTime") .withColumnRenamed("readingDateSource_ref","readingDateSource").withColumnRenamed("qualityCodesSystemId_ref","qualityCodesSystemId").withColumnRenamed("qualityCodesCategorization_ref","qualityCodesCategorization").withColumnRenamed("qualityCodesIndex_ref","qualityCodesIndex").withColumnRenamed("readingsValue_ref","readingsValue")
+                df_load_profile = df_load_profile_final.withColumnRenamed("complete_interval","readingUtcLocalTime").withColumnRenamed("readingLocalTime_ref","readingLocalTime") .withColumnRenamed("readingDateSource_ref","readingDateSource").withColumnRenamed("qualityCodesSystemId_ref","qualityCodesSystemId").withColumnRenamed("qualityCodesCategorization_ref","qualityCodesCategorization").withColumnRenamed("qualityCodesIndex_ref","qualityCodesIndex").withColumnRenamed("readingsValue_ref","readingsValue")
 
                 # selecciona las columnas en el orden que van y ademas hacer el union con el df original filtrado por
                 # los otros tipos de lecturas
 
-                df_Registers_Events = union.filter((union.readingType == "REGISTERS") | (union.readingType == "EVENTS"))
-                df_Registers_Events = df_Registers_Events.withColumn("validacion_intervalos",lit(""))
+                df_registers_events = union.filter((union.readingType == "REGISTERS") | (union.readingType == "EVENTS"))
+                df_registers_events = df_registers_events.withColumn("validacion_intervalos",lit(""))
 
                 lista_columnas = ["servicePointId","readingType","variableId","deviceId","meteringType","readingUtcLocalTime","readingDateSource","readingLocalTime","dstStatus"
                 ,"channel","unitOfMeasure","qualityCodesSystemId","qualityCodesCategorization","qualityCodesIndex","intervalSize","logNumber"
@@ -364,10 +362,10 @@ def cleaner(union, spark):
                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
                 ,"deviceType","brand","model","validacion_intervalos"]
 
-                df_LoadProfile = df_LoadProfile.select(*lista_columnas)
-                df_Registers_Events = df_Registers_Events.select(*lista_columnas)
+                df_load_profile = df_load_profile.select(*lista_columnas)
+                df_registers_events = df_registers_events.select(*lista_columnas)
 
-                union = df_LoadProfile.union(df_Registers_Events).coalesce(1)
+                union = df_load_profile.union(df_registers_events).coalesce(1)
 
         
         # PARTE 6: VALIDACION DE INTERVALOS

@@ -3,7 +3,7 @@ import json
 import random
 from pyspark.sql import SparkSession, DataFrame, Row
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType 
-from pyspark.sql.functions import *
+from pyspark.sql.functions import col, lit, udf, when, explode, arrays_zip, concat
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
@@ -12,11 +12,11 @@ from datetime import datetime, timedelta
 def translator(xml_file_path,spark):
 
     # Cada <MeterReadings> ... <MeterReadings/> va ser tomado como un row en el dataframe df.
-    rootTag = "AMRDEF"
-    rowTag = "MeterReadings"
+    root_tag = "AMRDEF"
+    row_tag = "MeterReadings"
 
-    strSch = spark.read.text("../configs/schemaAMRDEF_sim_allstring.json").first()[0]
-    schema = StructType.fromJson(json.loads(strSch))
+    str_sch = spark.read.text("../configs/schemaAMRDEF_sim_allstring.json").first()[0]
+    schema = StructType.fromJson(json.loads(str_sch))
 
     bucket = "s3://primestone-raw-dev/"
     #bucket = "s3://" + args['bucket_name'] + '/'
@@ -32,7 +32,7 @@ def translator(xml_file_path,spark):
     hes = filename.split("/")[1]
     owner = filename.split("/")[0]
 
-    df = spark.read.format("com.databricks.spark.xml").options(rootTag=rootTag).options(rowTag=rowTag).options(nullValue="").options(valueTag="_valueTag").option("columnNameOfCorruptRecord", "algunNombre") \
+    df = spark.read.format("com.databricks.spark.xml").options(root_tag=root_tag).options(row_tag=row_tag).options(nullValue="").options(valueTag="_valueTag").option("columnNameOfCorruptRecord", "algunNombre") \
         .schema(schema)\
         .load(xml_file_path)
 
@@ -77,7 +77,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    maxDemandDataReadings = df.withColumn("TouBucket", col("MaxDemandData.MaxDemandSpec._TouBucket")) \
+    max_demand_data_readings = df.withColumn("TouBucket", col("MaxDemandData.MaxDemandSpec._TouBucket")) \
                                 .withColumn("Direction", col("MaxDemandData.MaxDemandSpec._Direction")) \
                                 .withColumn("UOM", col("MaxDemandData.MaxDemandSpec._UOM")) \
                                 .withColumn("Multiplier", col("MaxDemandData.MaxDemandSpec._Multiplier")) \
@@ -154,7 +154,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate")
-    maxDemandDataReadings = maxDemandDataReadings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
+    max_demand_data_readings = max_demand_data_readings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
                                                 .withColumn("tmp", explode("tmp")) \
                                                 .withColumn("TimeStamp", 
                                                             when(col("tmp.TimeStamp").isNull(), col("MeterReadings_CollectionTime")) \
@@ -216,7 +216,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    demandResetCountReadings = df.withColumn("Count", col("DemandResetCount._Count")) \
+    demand_reset_count_readings = df.withColumn("Count", col("DemandResetCount._Count")) \
                                 .withColumn("TimeStamp", col("DemandResetCount._TimeStamp")) \
                                 .withColumn("UOM", col("DemandResetCount._UOM")) \
                                 .withColumn("FixedAttribute_variableId", lit("Demand Reset Count")) \
@@ -289,7 +289,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate")
-    demandResetCountReadings = demandResetCountReadings.withColumn("tmp", arrays_zip("Count", "TimeStamp","UOM")) \
+    demand_reset_count_readings = demand_reset_count_readings.withColumn("tmp", arrays_zip("Count", "TimeStamp","UOM")) \
                                                 .withColumn("tmp", explode("tmp")) \
                                                 .withColumn("MeterReadings_Source", 
                                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -350,7 +350,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    consumptionDataReadings = df.withColumn("TouBucket", col("ConsumptionData.ConsumptionSpec._TouBucket")) \
+    consumption_data_readings = df.withColumn("TouBucket", col("ConsumptionData.ConsumptionSpec._TouBucket")) \
                                 .withColumn("Direction", col("ConsumptionData.ConsumptionSpec._Direction")) \
                                 .withColumn("UOM", col("ConsumptionData.ConsumptionSpec._UOM")) \
                                 .withColumn("Multiplier", col("ConsumptionData.ConsumptionSpec._Multiplier")) \
@@ -425,7 +425,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate")
-    consumptionDataReadings = consumptionDataReadings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
+    consumption_data_readings = consumption_data_readings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
                                                     .withColumn("tmp", explode("tmp")) \
                                                     .withColumn("MeterReadings_Source", 
                                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -485,7 +485,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    coincidentDemandDataReadings = df.withColumn("TouBucket", col("CoincidentDemandData.CoincidentDemandSpec._TouBucket")) \
+    coincident_demand_data_readings = df.withColumn("TouBucket", col("CoincidentDemandData.CoincidentDemandSpec._TouBucket")) \
                                 .withColumn("Direction", col("CoincidentDemandData.CoincidentDemandSpec._Direction")) \
                                 .withColumn("UOM", col("CoincidentDemandData.CoincidentDemandSpec._UOM")) \
                                 .withColumn("Multiplier", col("CoincidentDemandData.CoincidentDemandSpec._Multiplier")) \
@@ -562,7 +562,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate") 
-    coincidentDemandDataReadings = coincidentDemandDataReadings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier", "TimeStamp")) \
+    coincident_demand_data_readings = coincident_demand_data_readings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier", "TimeStamp")) \
                                                                 .withColumn("tmp", explode("tmp")) \
                                                                 .withColumn("MeterReadings_Source", 
                                                                 when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -623,7 +623,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    cumulativeDemandDataReadings = df.withColumn("TouBucket", col("CumulativeDemandData.CumulativeDemandSpec._TouBucket")) \
+    cumulative_demand_data_readings = df.withColumn("TouBucket", col("CumulativeDemandData.CumulativeDemandSpec._TouBucket")) \
                                 .withColumn("Direction", col("CumulativeDemandData.CumulativeDemandSpec._Direction")) \
                                 .withColumn("UOM", col("CumulativeDemandData.CumulativeDemandSpec._UOM")) \
                                 .withColumn("Multiplier", col("CumulativeDemandData.CumulativeDemandSpec._Multiplier")) \
@@ -700,7 +700,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate") 
-    cumulativeDemandDataReadings = cumulativeDemandDataReadings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
+    cumulative_demand_data_readings = cumulative_demand_data_readings.withColumn("tmp", arrays_zip("TouBucket", "Direction","UOM", "Value", "Multiplier","TimeStamp")) \
                                                                 .withColumn("tmp", explode("tmp")) \
                                                                 .withColumn("MeterReadings_Source", 
                                                                 when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -761,7 +761,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    demandResetReadings = df.withColumn("TimeStamp", col("DemandReset._TimeStamp")) \
+    demand_reset_readings = df.withColumn("TimeStamp", col("DemandReset._TimeStamp")) \
                                 .withColumn("FixedAttribute_readingsValue", lit("0")) \
                                 .withColumn("FixedAttribute_unitOfMeasure", lit("-")) \
                                 .withColumn("FixedAttribute_variableId", lit("Demand Reset")) \
@@ -834,7 +834,7 @@ def translator(xml_file_path,spark):
                                         "Meter._MediaType",
                                         "Meter._InstallDate",
                                         "Meter._RemovalDate")
-    demandResetReadings = demandResetReadings.withColumn("tmp", arrays_zip("TimeStamp")) \
+    demand_reset_readings = demand_reset_readings.withColumn("tmp", arrays_zip("TimeStamp")) \
                                                 .withColumn("tmp", explode("tmp")) \
                                                 .withColumn("MeterReadings_Source", 
                                                 when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -891,7 +891,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    instrumentationValueReadings = df.withColumn("TimeStamp", col("InstrumentationValue._TimeStamp")) \
+    instrumentation_value_readings = df.withColumn("TimeStamp", col("InstrumentationValue._TimeStamp")) \
                                     .withColumn("Name", col("InstrumentationValue._Name")) \
                                     .withColumn("Phase", col("InstrumentationValue._Phase")) \
                                     .withColumn("Value", col("InstrumentationValue._Value")) \
@@ -964,7 +964,7 @@ def translator(xml_file_path,spark):
                                             "Meter._MediaType",
                                             "Meter._InstallDate",
                                             "Meter._RemovalDate")
-    instrumentationValueReadings = instrumentationValueReadings.withColumn("tmp", arrays_zip("TimeStamp","Phase","Name","Value")) \
+    instrumentation_value_readings = instrumentation_value_readings.withColumn("tmp", arrays_zip("TimeStamp","Phase","Name","Value")) \
                                                                 .withColumn("tmp", explode("tmp")) \
                                                                 .withColumn("MeterReadings_Source", 
                                                                 when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -1029,47 +1029,47 @@ def translator(xml_file_path,spark):
 
     ######################################################################################################################################################
 
-    StatusData = []
+    status_data = []
     for row in df.rdd.collect():
             if row.Meter != None:
-                    MeterReadings_Source = row._Source
-                    MeterReadings_SourceIrn = row._SourceIrn
-                    MeterReadings_CollectionTime = row._CollectionTime
-                    Meter_Irn = row.Meter._MeterIrn
-                    Meter_SdpIdent = row.Meter._SdpIdent
-                    Meter_Description = row.Meter._Description
-                    Meter_IsActive = row.Meter._IsActive
-                    Meter_SerialNumber = row.Meter._SerialNumber
-                    Meter_MeterType = row.Meter._MeterType
-                    Meter_AccountIdent = row.Meter._AccountIdent
-                    Meter_TimeZoneIndex = row.Meter._TimeZoneIndex
-                    Meter_MediaType = row.Meter._MediaType
-                    Meter_InstallDate = row.Meter._InstallDate
-                    Meter_RemovalDate = row.Meter._RemovalDate
+                    meter_readings_source = row._Source
+                    meter_readings_sourceirn = row._SourceIrn
+                    meter_readings_collection_time = row._CollectionTime
+                    meter_irn = row.Meter._MeterIrn
+                    meter_sdp_ident = row.Meter._SdpIdent
+                    meter_description = row.Meter._Description
+                    meter_is_active = row.Meter._IsActive
+                    meter_serial_number = row.Meter._SerialNumber
+                    meter_meter_type = row.Meter._MeterType
+                    meter_account_ident = row.Meter._AccountIdent
+                    meter_time_zone_index = row.Meter._TimeZoneIndex
+                    meter_media_type = row.Meter._MediaType
+                    meter_install_date = row.Meter._InstallDate
+                    meter_removal_date = row.Meter._RemovalDate
                     if row.Statuses != None:
                             for statuses in row.Statuses:
                                     for status in statuses.Status:
-                                            Status_Id = status._Id
-                                            Status_Category = status._Category
-                                            Status_Name = status._Name
-                                            Status_Value = status._Value
+                                            status_id = status._Id
+                                            status_category = status._Category
+                                            status_name = status._Name
+                                            status_value = status._Value
 
-                                            servicePointId = Meter_SdpIdent
-                                            if servicePointId == None:
-                                                    servicePointId = Meter_Irn
+                                            service_point_id = meter_sdp_ident
+                                            if service_point_id == None:
+                                                    service_point_id = meter_irn
 
-                                            if Status_Value == "true": #Esta lectura solo se toma si Value=0 o magnitud
-                                                    Status_Value = 0
-                                            if Status_Value != "false":
-                                                    StatusData.append ({
-                                                            "servicePointId":servicePointId,
+                                            if status_value == "true": #Esta lectura solo se toma si Value=0 o magnitud
+                                                    status_value = 0
+                                            if status_value != "false":
+                                                    status_data.append ({
+                                                            "servicePointId":service_point_id,
                                                             "readingType":"EVENTS",
-                                                            "variableId":Status_Category + ' ' + Status_Name,
-                                                            "deviceId": Meter_Irn,
+                                                            "variableId":status_category + ' ' + status_name,
+                                                            "deviceId": meter_irn,
                                                             "meteringType": "MAIN",
                                                             "readingUtcLocalTime": "",
-                                                            "readingDateSource": MeterReadings_CollectionTime,
-                                                            "readingLocalTime": MeterReadings_CollectionTime,
+                                                            "readingDateSource": meter_readings_collection_time,
+                                                            "readingLocalTime": meter_readings_collection_time,
                                                             "dstStatus":"",
                                                             "channel": "",
                                                             "unitOfMeasure":"-",
@@ -1083,32 +1083,32 @@ def translator(xml_file_path,spark):
                                                             "ke":"",
                                                             "sf":"",
                                                             "version":"Original",
-                                                            "readingsValue": Status_Value,
-                                                            "primarySource":MeterReadings_Source,
+                                                            "readingsValue": status_value,
+                                                            "primarySource":meter_readings_source,
                                                             "owner":owner,
                                                             "guidFile":guid,
                                                             "estatus": "Activo",
                                                             "registersNumber":"",
-                                                            "eventsCode":Status_Id,
+                                                            "eventsCode":status_id,
                                                             "agentId":"",
                                                             "agentDescription":"",
-                                                            "_SourceIrn":str(MeterReadings_SourceIrn),
-                                                            "_Description":str(Meter_Description),
-                                                            "_IsActive":Meter_IsActive,
-                                                            "_SerialNumber":str(Meter_SerialNumber),
-                                                            "_MeterType":str(Meter_MeterType),
-                                                            "_AccountIdent":str(Meter_AccountIdent),
-                                                            "_TimeZoneIndex":str(Meter_TimeZoneIndex),
-                                                            "_MediaType":str(Meter_MediaType),
-                                                            "_InstallDate":str(Meter_InstallDate),
-                                                            "_RemovalDate":str(Meter_RemovalDate)
+                                                            "_SourceIrn":str(meter_readings_sourceirn),
+                                                            "_Description":str(meter_description),
+                                                            "_IsActive":meter_is_active,
+                                                            "_SerialNumber":str(meter_serial_number),
+                                                            "_MeterType":str(meter_meter_type),
+                                                            "_AccountIdent":str(meter_account_ident),
+                                                            "_TimeZoneIndex":str(meter_time_zone_index),
+                                                            "_MediaType":str(meter_media_type),
+                                                            "_InstallDate":str(meter_install_date),
+                                                            "_RemovalDate":str(meter_removal_date)
                                                     })
 
-    StatusData = spark.sparkContext.parallelize(StatusData) \
+    status_data = spark.sparkContext.parallelize(status_data) \
                             .map(lambda x: Row(**OrderedDict(x.items())))
 
-    if StatusData.isEmpty() == False:
-            statusReadings = spark.createDataFrame(StatusData.coalesce(1)) \
+    if status_data.isEmpty() == False:
+            status_data_readings = spark.createDataFrame(status_data.coalesce(1)) \
                             .withColumn("primarySource", 
                                     when(col("primarySource") == "Visual", lit("Visual")) \
                                     .when(col("primarySource") == "Remote", lit("Remoto")) \
@@ -1190,7 +1190,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    loadProfileSummaryReadings = df.withColumn("UOM", col("LoadProfileSummary.Channel._UOM")) \
+    load_profile_summary_readings = df.withColumn("UOM", col("LoadProfileSummary.Channel._UOM")) \
                                     .withColumn("Direction", col("LoadProfileSummary.Channel._Direction")) \
                                     .withColumn("SumOfIntervalValues", col("LoadProfileSummary.Channel._SumOfIntervalValues")) \
                                     .withColumn("Multiplier", col("LoadProfileSummary.Channel._Multiplier")) \
@@ -1263,7 +1263,7 @@ def translator(xml_file_path,spark):
                                             "Meter._MediaType",
                                             "Meter._InstallDate",
                                             "Meter._RemovalDate")
-    loadProfileSummaryReadings = loadProfileSummaryReadings.withColumn("tmp", arrays_zip("UOM","Direction","SumOfIntervalValues","Multiplier")) \
+    load_profile_summary_readings = load_profile_summary_readings.withColumn("tmp", arrays_zip("UOM","Direction","SumOfIntervalValues","Multiplier")) \
                                                             .withColumn("tmp", explode("tmp")) \
                                                             .withColumn("MeterReadings_Source", 
                                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -1320,7 +1320,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    outageCountReadings = df.withColumn("ReadingTime", col("OutageCountSummary.OutageCount._ReadingTime")) \
+    outage_count_readings = df.withColumn("ReadingTime", col("OutageCountSummary.OutageCount._ReadingTime")) \
                             .withColumn("Value", col("OutageCountSummary.OutageCount._Value")) \
                             .withColumn("FixedAttribute_unitOfMeasure", lit("Count")) \
                             .withColumn("FixedAttribute_variableId", lit("Outage count")) \
@@ -1393,7 +1393,7 @@ def translator(xml_file_path,spark):
                                     "Meter._MediaType",
                                     "Meter._InstallDate",
                                     "Meter._RemovalDate") 
-    outageCountReadings = outageCountReadings.withColumn("tmp", arrays_zip("ReadingTime","Value")) \
+    outage_count_readings = outage_count_readings.withColumn("tmp", arrays_zip("ReadingTime","Value")) \
                                             .withColumn("tmp", explode("tmp")) \
                                             .withColumn("MeterReadings_Source", 
                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -1580,7 +1580,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    reverseEnergySummaryReadings = df.withColumn("CurrentValue", col("ReverseEnergySummary.ReverseEnergy._CurrentValue")) \
+    reverse_energy_summary_readings = df.withColumn("CurrentValue", col("ReverseEnergySummary.ReverseEnergy._CurrentValue")) \
                                     .withColumn("FixedAttribute_readingLocalTime", lit("")) \
                                     .withColumn("FixedAttribute_unitOfMeasure", lit("-")) \
                                     .withColumn("FixedAttribute_variableId", lit("Reverse energy summary")) \
@@ -1653,7 +1653,7 @@ def translator(xml_file_path,spark):
                                             "Meter._MediaType",
                                             "Meter._InstallDate",
                                             "Meter._RemovalDate") 
-    reverseEnergySummaryReadings=reverseEnergySummaryReadings.withColumn("tmp", arrays_zip("CurrentValue")) \
+    reverse_energy_summary_readings=reverse_energy_summary_readings.withColumn("tmp", arrays_zip("CurrentValue")) \
                                                             .withColumn("tmp", explode("tmp")) \
                                                             .withColumn("MeterReadings_Source", 
                                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
@@ -1710,7 +1710,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    eventsDataReadings = df.select("EventData",
+    events_data_readings = df.select("EventData",
                                     "_Source",
                                     "Meter._SdpIdent",
                                     "Meter._MeterIrn",
@@ -1818,126 +1818,126 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    IntervalData = []
+    interval_data = []
     for row in df.rdd.collect():
             if row.Meter != None:
-                    MeterReadings_Source = row._Source
-                    MeterReadings_SourceIrn = row._SourceIrn
-                    Meter_Irn = row.Meter._MeterIrn
-                    Meter_SdpIdent = row.Meter._SdpIdent
-                    Meter_Description = row.Meter._Description
-                    Meter_IsActive = row.Meter._IsActive
-                    Meter_SerialNumber = row.Meter._SerialNumber
-                    Meter_MeterType = row.Meter._MeterType
-                    Meter_AccountIdent = row.Meter._AccountIdent
-                    Meter_TimeZoneIndex = row.Meter._TimeZoneIndex
-                    Meter_MediaType = row.Meter._MediaType
-                    Meter_InstallDate = row.Meter._InstallDate
-                    Meter_RemovalDate = row.Meter._RemovalDate
+                    meter_readings_source = row._Source
+                    meter_readings_sourceirn = row._SourceIrn
+                    meter_irn = row.Meter._MeterIrn
+                    meter_sdp_ident = row.Meter._SdpIdent
+                    meter_description = row.Meter._Description
+                    meter_is_active = row.Meter._IsActive
+                    meter_serial_number = row.Meter._SerialNumber
+                    meter_meter_type = row.Meter._MeterType
+                    meter_account_ident = row.Meter._AccountIdent
+                    meter_time_zone_index = row.Meter._TimeZoneIndex
+                    meter_media_type = row.Meter._MediaType
+                    meter_install_date = row.Meter._InstallDate
+                    meter_removal_date = row.Meter._RemovalDate
                     if row.IntervalData != None:
-                            for intervalData in row.IntervalData:
-                                    IntervalSpec_Channel = intervalData.IntervalSpec._Channel
-                                    IntervalSpec_Direction = intervalData.IntervalSpec._Direction
-                                    IntervalSpec_Interval = intervalData.IntervalSpec._Interval
-                                    IntervalSpec_Multiplier = intervalData.IntervalSpec._Multiplier
-                                    IntervalSpec_Channel = intervalData.IntervalSpec._Channel
-                                    IntervalSpec_UOM = intervalData.IntervalSpec._UOM
-                                    for reading in intervalData.Reading:
-                                            Reading_RawReading = reading._RawReading
-                                            Reading_TimeStamp = reading._TimeStamp
+                            for interval_data in row.IntervalData:
+                                    interval_spec_channel = interval_data.IntervalSpec._Channel
+                                    interval_spec_direction = interval_data.IntervalSpec._Direction
+                                    interval_spec_interval = interval_data.IntervalSpec._Interval
+                                    interval_spec_multiplier = interval_data.IntervalSpec._Multiplier
+                                    interval_spec_uom = interval_data.IntervalSpec._UOM
 
-                                            servicePointId = Meter_SdpIdent
-                                            if servicePointId == None:
-                                                    servicePointId = Meter_Irn
+                                    for reading in interval_data.Reading:
+                                            reading_rawreading = reading._RawReading
+                                            reading_timestamp = reading._TimeStamp
+
+                                            service_point_id = meter_sdp_ident
+                                            if service_point_id == None:
+                                                    service_point_id = meter_irn
 
                                             dst = ""
-                                            QualityCode_SystemId = ""
-                                            QualityCode_Categorization = ""
-                                            QualityCode_Index = ""
+                                            qualitycode_systemid = ""
+                                            qualitycode_categorization = ""
+                                            qualitycode_index = ""
                                             if reading.QualityFlags != None:
-                                                    qualityFlag = reading.QualityFlags
-                                                    if qualityFlag._TimeChanged != None:
-                                                            QualityCode_SystemId = "2"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "9"
-                                                    elif qualityFlag._ClockSetBackward != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "128"
-                                                    elif qualityFlag._LongInterval != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "3"
-                                                    elif qualityFlag._ClockSetForward != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "64"
-                                                    elif qualityFlag._PartialInterval != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "2"
-                                                    elif qualityFlag._InvalidTime != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "1"
-                                                            QualityCode_Index = "9"
-                                                    elif qualityFlag._SkippedInterval != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "4"
-                                                    elif qualityFlag._CompleteOutage != None or qualityFlag._PartialOutage != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "2"
-                                                            QualityCode_Index = "32"
-                                                    elif qualityFlag._PulseOverflow != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "1"
-                                                    elif qualityFlag._TestMode != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "5"
-                                                    elif qualityFlag._Tamper != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "3"
-                                                            QualityCode_Index = "0"
-                                                    elif qualityFlag._SuspectedOutage != None or qualityFlag._Restoration != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "2"
-                                                            QualityCode_Index = "0"
-                                                    elif qualityFlag._DST != None:
-                                                            QualityCode_SystemId = "1"
-                                                            QualityCode_Categorization = "4"
-                                                            QualityCode_Index = "16"
+                                                    quality_flag = reading.QualityFlags
+                                                    if quality_flag._TimeChanged != None:
+                                                            qualitycode_systemid = "2"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "9"
+                                                    elif quality_flag._ClockSetBackward != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "128"
+                                                    elif quality_flag._LongInterval != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "3"
+                                                    elif quality_flag._ClockSetForward != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "64"
+                                                    elif quality_flag._PartialInterval != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "2"
+                                                    elif quality_flag._InvalidTime != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "1"
+                                                            qualitycode_index = "9"
+                                                    elif quality_flag._SkippedInterval != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "4"
+                                                    elif quality_flag._CompleteOutage != None or quality_flag._PartialOutage != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "2"
+                                                            qualitycode_index = "32"
+                                                    elif quality_flag._PulseOverflow != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "1"
+                                                    elif quality_flag._TestMode != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "5"
+                                                    elif quality_flag._Tamper != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "3"
+                                                            qualitycode_index = "0"
+                                                    elif quality_flag._SuspectedOutage != None or quality_flag._Restoration != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "2"
+                                                            qualitycode_index = "0"
+                                                    elif quality_flag._DST != None:
+                                                            qualitycode_systemid = "1"
+                                                            qualitycode_categorization = "4"
+                                                            qualitycode_index = "16"
                                                             dst = "1"
-                                                    elif qualityFlag._InvalidValue != None:
-                                                            QualityCode_SystemId = "2"
-                                                            QualityCode_Categorization = "5"
-                                                            QualityCode_Index = "256"
+                                                    elif quality_flag._InvalidValue != None:
+                                                            qualitycode_systemid = "2"
+                                                            qualitycode_categorization = "5"
+                                                            qualitycode_index = "256"
 
-                                            IntervalData.append ({
-                                                    "servicePointId":servicePointId,
+                                            interval_data.append ({
+                                                    "servicePointId":service_point_id,
                                                     "readingType":"LOAD PROFILE READING",
-                                                    "variableId":IntervalSpec_UOM + ' ' + IntervalSpec_Direction,
-                                                    "deviceId": Meter_Irn,
+                                                    "variableId":interval_spec_uom + ' ' + interval_spec_direction,
+                                                    "deviceId": meter_irn,
                                                     "meteringType": "MAIN",
                                                     "readingUtcLocalTime": "",
-                                                    "readingDateSource": Reading_TimeStamp,
-                                                    "readingLocalTime": Reading_TimeStamp,
+                                                    "readingDateSource": reading_timestamp,
+                                                    "readingLocalTime": reading_timestamp,
                                                     "dstStatus":dst,
-                                                    "channel":IntervalSpec_Channel,
-                                                    "unitOfMeasure":IntervalSpec_UOM,
-                                                    "qualityCodesSystemId":QualityCode_SystemId,
-                                                    "qualityCodesCategorization":QualityCode_Categorization,
-                                                    "qualityCodesIndex":QualityCode_Index,
-                                                    "intervalSize":IntervalSpec_Interval,
+                                                    "channel":interval_spec_channel,
+                                                    "unitOfMeasure":interval_spec_uom,
+                                                    "qualityCodesSystemId":qualitycode_systemid,
+                                                    "qualityCodesCategorization":qualitycode_categorization,
+                                                    "qualityCodesIndex":qualitycode_index,
+                                                    "intervalSize":interval_spec_interval,
                                                     "logNumber": "1",
                                                     "ct":"",
                                                     "pt":"",
-                                                    "ke":IntervalSpec_Multiplier,
+                                                    "ke":interval_spec_multiplier,
                                                     "sf":"",
                                                     "version":"Original",
-                                                    "readingsValue":Reading_RawReading,
-                                                    "primarySource":MeterReadings_Source,
+                                                    "readingsValue":reading_rawreading,
+                                                    "primarySource":meter_readings_source,
                                                     "owner":owner,
                                                     "guidFile":guid,
                                                     "estatus": "Activo",
@@ -1945,21 +1945,21 @@ def translator(xml_file_path,spark):
                                                     "eventsCode":"",
                                                     "agentId":"",
                                                     "agentDescription":"",
-                                                    "_SourceIrn":str(MeterReadings_SourceIrn),
-                                                    "_Description":str(Meter_Description),
-                                                    "_IsActive":Meter_IsActive,
-                                                    "_SerialNumber":str(Meter_SerialNumber),
-                                                    "_MeterType":str(Meter_MeterType),
-                                                    "_AccountIdent":str(Meter_AccountIdent),
-                                                    "_TimeZoneIndex":str(Meter_TimeZoneIndex),
-                                                    "_MediaType":str(Meter_MediaType),
-                                                    "_InstallDate":str(Meter_InstallDate),
-                                                    "_RemovalDate":str(Meter_RemovalDate)
+                                                    "_SourceIrn":str(meter_readings_sourceirn),
+                                                    "_Description":str(meter_description),
+                                                    "_IsActive":meter_is_active,
+                                                    "_SerialNumber":str(meter_serial_number),
+                                                    "_MeterType":str(meter_meter_type),
+                                                    "_AccountIdent":str(meter_account_ident),
+                                                    "_TimeZoneIndex":str(meter_time_zone_index),
+                                                    "_MediaType":str(meter_media_type),
+                                                    "_InstallDate":str(meter_install_date),
+                                                    "_RemovalDate":str(meter_removal_date)
                                                     })
-    IntervalData = spark.sparkContext.parallelize(IntervalData) \
+    interval_data = spark.sparkContext.parallelize(interval_data) \
                             .map(lambda x: Row(**OrderedDict(x.items())))
-    if IntervalData.isEmpty() == False:
-            intervalDataReadings = spark.createDataFrame(IntervalData.coalesce(1)) \
+    if interval_data.isEmpty() == False:
+            interval_data_readings = spark.createDataFrame(interval_data.coalesce(1)) \
                                     .withColumn("primarySource", 
                                             when(col("primarySource") == "Visual", lit("Visual")) \
                                             .when(col("primarySource") == "Remote", lit("Remoto")) \
@@ -2043,18 +2043,18 @@ def translator(xml_file_path,spark):
         return reduce(DataFrame.unionAll, dfs)
 
 
-    readings_list = [maxDemandDataReadings, demandResetCountReadings, \
-            consumptionDataReadings, coincidentDemandDataReadings, \
-            cumulativeDemandDataReadings, demandResetReadings, \
-            instrumentationValueReadings, \
-            loadProfileSummaryReadings, outageCountReadings, \
-            reverseEnergySummaryReadings, eventsDataReadings ]
+    readings_list = [max_demand_data_readings, demand_reset_count_readings, \
+            consumption_data_readings, coincident_demand_data_readings, \
+            cumulative_demand_data_readings, demand_reset_readings, \
+            instrumentation_value_readings, \
+            load_profile_summary_readings, outage_count_readings, \
+            reverse_energy_summary_readings, events_data_readings ]
 
-    if IntervalData.isEmpty() == False:
-            readings_list.append(intervalDataReadings)
+    if interval_data.isEmpty() == False:
+            readings_list.append(interval_data_readings)
 
-    if StatusData.isEmpty() == False:
-            readings_list.append(statusReadings)
+    if status_data.isEmpty() == False:
+            readings_list.append(status_data_readings)
 
     union = union_all(*readings_list).coalesce(1) #Aca los estoy uniendo en una sola partición, si se saca el .coalesce(1) se van a crear distintas particiones para c/u
 

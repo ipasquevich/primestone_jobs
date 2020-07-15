@@ -1,7 +1,6 @@
 from job_translate_amrdef import translator
 from  job_enrich import enricher
 from  job_clean import cleaner
-#from intervals import interval
 
 from dependencies.spark import start_spark
 
