@@ -14,13 +14,13 @@ from datetime import datetime, timedelta
 from urllib import request, parse
 
 
-def enricher(union,spark):
+def enricher(df_union,spark):
 
     # Creacion del diccionario para el request
 
-    hes = union.head().readingsSource
-    owner = union.head().owner
-    guid = union.head().guidFile
+    hes = df_union.head().readingsSource
+    owner = df_union.head().owner
+    guid = df_union.head().guidFile
     
     dicc = {"owner": {
                             "hes": hes,
@@ -32,15 +32,15 @@ def enricher(union,spark):
 
     # creo el dataframe con valores unicos tanto de servicePointId como de deviceId
 
-    df_relation_device = union.dropDuplicates((["servicePointId","deviceId"]))
+    df_relation_device = df_union.dropDuplicates((["servicePointId","deviceId"]))
     df_service_point = df_relation_device.dropDuplicates((["servicePointId"]))
     df_device = df_relation_device.dropDuplicates((["deviceId"]))
 
-    df_service_point_variable_prof = union.filter(union.readingType == "LOAD PROFILE READING")
+    df_service_point_variable_prof = df_union.filter(df_union.readingType == "LOAD PROFILE READING")
     df_service_point_variable_prof = df_service_point_variable_prof.dropDuplicates((["readingType","variableId","servicePointId"
                                     ,"meteringType","unitOfMeasure","logNumber","channel","intervalSize"]))
 
-    df_service_point_variable_reg_event = union.filter((union.readingType == "REGISTERS") | (union.readingType == "EVENTS"))
+    df_service_point_variable_reg_event = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "EVENTS"))
     df_service_point_variable_reg_event = df_service_point_variable_reg_event.dropDuplicates((["readingType","variableId","servicePointId",
                                     "meteringType","unitOfMeasure"]))
 
@@ -180,11 +180,11 @@ def enricher(union,spark):
     #IMPORTANTE 
     # elimino la columna relationStartDate porque en el paso siguiente hago el join con los valores enriquecidos
     # y la vuelvo a obtener (con valores actualizados)
-    union = union.drop("relationStartDate")
+    df_union = df_union.drop("relationStartDate")
 
     # hago un inner join de los dataframes creados con el dataframe original (enrichment)
-    union = union.join(df_relation_device, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
-    union = union.join(df_service_point_variable, on=['variableId',"servicePointId","readingType"], how='inner').coalesce(1)
+    df_union = df_union.join(df_relation_device, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
+    df_union = df_union.join(df_service_point_variable, on=['variableId',"servicePointId","readingType"], how='inner').coalesce(1)
 
 
     # bloque calculo de readingUtcLocalTime
@@ -192,7 +192,7 @@ def enricher(union,spark):
     # para la conversion necesito tomar el valor de servicePointTimeZone
 
     # Si hay registros con valores nulos en servicePointTimeZone entonces no van a servir para el analisis y hay que eliminarlos
-    union = union.filter(union.servicePointTimeZone.isNotNull())
+    df_union = df_union.filter(df_union.servicePointTimeZone.isNotNull())
 
     # defino el diccionario con las transformaciones para cada codigo
     utc_dicc = {
@@ -262,11 +262,11 @@ def enricher(union,spark):
 
     # Aplico la funcion al dataframe
     udf_object = udf(conversor_utc, StringType())
-    union = union.withColumn("readingUtcLocalTime", udf_object(struct([union[x] for x in union.columns])))
+    df_union = df_union.withColumn("readingUtcLocalTime", udf_object(struct([df_union[x] for x in df_union.columns])))
 
 
     # escribo los csv
-    union.write.format('csv').mode("overwrite").save("./output/enriched", header="true", emptyValue="")
+    df_union.write.format('csv').mode("overwrite").save("./output/enriched", header="true", emptyValue="")
 
 
-    return union
+    return df_union

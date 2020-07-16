@@ -13,7 +13,7 @@ from urllib import request, parse
 
 # BLOQUE CLEANING
 
-def cleaner(union, spark):
+def cleaner(df_union, spark):
 
         #Hago el request para traer el json de configuracion
         base_url = "http://80f56133-default-platforms-88e5-2108999998.us-east-1.elb.amazonaws.com/platform_settings/get_configuration"
@@ -51,26 +51,26 @@ def cleaner(union, spark):
         #descarte de banderas, si alguna es false, se descarta el registro (se guarda en otro dataframe que se 
         # va a usar para crear los logs)
 
-        if check_empty(union):
+        if check_empty(df_union):
                 # primero revisamos por la bandera de estado de asociacion, si esta es falsa todos los registros con dicha condicion
                 # van a separarse el dataframe original para ir al dataframe de logs
 
-                df_logs = union.filter(union.result_rD == False).withColumn("Descripcion_log",lit("Estado de asociacion"))
+                df_logs = df_union.filter(df_union.result_rD == False).withColumn("Descripcion_log",lit("Estado de asociacion"))
                 df_logs.show()
                 df_logs.printSchema()
 
-                union = union.filter(union.result_rD == True)
+                df_union = df_union.filter(df_union.result_rD == True)
 
 
                 # Ahora separamos aquellos registros que tienen falso en el estado de la variable o en la bandera de guardado
                 # y lo concatenamos al df de logs
 
-                df_logs_aux = union.filter((union.result_sPV == False) | (union.toStock == False))\
+                df_logs_aux = df_union.filter((df_union.result_sPV == False) | (df_union.toStock == False))\
                 .withColumn("Descripcion_log",lit("result variable - to stock "))
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
-                union = union.filter((union.result_sPV == True) & (union.toStock == True))
+                df_union = df_union.filter((df_union.result_sPV == True) & (df_union.toStock == True))
 
 
 
@@ -78,7 +78,7 @@ def cleaner(union, spark):
         # PARTE 2: DIAS PASADOS FUTUROS
         # en base a la respuesta del request (req_config) tenemos que encontrar aquellas lecturas de los dias que correspondan
 
-        if check_empty(union):
+        if check_empty(df_union):
 
                 # creamos la funcion para aplicar a cada fila del df
                 hoy = datetime.today()
@@ -100,20 +100,20 @@ def cleaner(union, spark):
 
                 # Aplico la funcion al dataframe
                 udf_object = udf(pasado_futuro, BooleanType())
-                union = union.withColumn("lastReadDate_result", udf_object(struct([union[x] for x in union.columns])))
+                df_union = df_union.withColumn("lastReadDate_result", udf_object(struct([df_union[x] for x in df_union.columns])))
 
 
                 # Ahora separamos aquellos registros que tienen falso en el lastReadDate_result
                 # y lo concatenamos al df de logs
 
-                df_logs_aux = union.filter(union.lastReadDate_result == False)\
+                df_logs_aux = df_union.filter(df_union.lastReadDate_result == False)\
                 .withColumn("Descripcion_log",lit("dias pasado-futuro"))\
                 .drop("lastReadDate_result")
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
-                union = union.filter(union.lastReadDate_result == True)
-                union = union.drop("lastReadDate_result")
+                df_union = df_union.filter(df_union.lastReadDate_result == True)
+                df_union = df_union.drop("lastReadDate_result")
 
 
         # PARTE 3: DUPLICADOS E INCONSISTENCIAS
@@ -121,7 +121,7 @@ def cleaner(union, spark):
         # de datos (servicePointId, deviceId, meteringType, variableId, readingLocalTime,logNumber) pero con distinto  
         # readingsValue entonces se descartan todas las filas por inconsistencia en los datos (paso 2).
 
-        if check_empty(union):
+        if check_empty(df_union):
 
                 # paso 1 (DUPLICADOS)
                 #union_unique = union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue'])
@@ -129,7 +129,7 @@ def cleaner(union, spark):
 
                 ### Get Duplicate rows in pyspark
 
-                df_logs_aux = union.groupBy('servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue').count()
+                df_logs_aux = df_union.groupBy('servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue').count()
                 df_logs_aux = df_logs_aux.filter(df_logs_aux["count"] > 1)
                 df_logs_aux = df_logs_aux.select( col("servicePointId").alias("servicePointId_2")
                                                                 ,col("deviceId").alias("deviceId_2")
@@ -139,27 +139,27 @@ def cleaner(union, spark):
                                                                 ,col("logNumber").alias("logNumber_2")
                                                                 ,col("readingsValue").alias("readingsValue_2") )
                 df_logs_aux = df_logs_aux.withColumn("Descripcion_log",lit("Duplicados"))
-                df_logs_aux = union.join(df_logs_aux, [(union.servicePointId == df_logs_aux.servicePointId_2)
-                                                        , (union.deviceId == df_logs_aux.deviceId_2)
-                                                        , (union.meteringType == df_logs_aux.meteringType_2)
-                                                        , (union.variableId == df_logs_aux.variableId_2)
-                                                        , (union.readingLocalTime == df_logs_aux.readingLocalTime_2)
-                                                        , (union.logNumber.eqNullSafe(df_logs_aux.logNumber_2))
-                                                        , (union.readingsValue == df_logs_aux.readingsValue_2)]
+                df_logs_aux = df_union.join(df_logs_aux, [(df_union.servicePointId == df_logs_aux.servicePointId_2)
+                                                        , (df_union.deviceId == df_logs_aux.deviceId_2)
+                                                        , (df_union.meteringType == df_logs_aux.meteringType_2)
+                                                        , (df_union.variableId == df_logs_aux.variableId_2)
+                                                        , (df_union.readingLocalTime == df_logs_aux.readingLocalTime_2)
+                                                        , (df_union.logNumber.eqNullSafe(df_logs_aux.logNumber_2))
+                                                        , (df_union.readingsValue == df_logs_aux.readingsValue_2)]
                                                         ,how = 'inner').coalesce(1)
                 df_logs_aux = df_logs_aux.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue'])
                 columns_to_drop = ["servicePointId_2","deviceId_2","meteringType_2","variableId_2","readingLocalTime_2","logNumber_2","readingsValue_2"]
                 df_logs_aux = df_logs_aux.drop(*columns_to_drop)
 
-                union = union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue'])
+                df_union = df_union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue'])
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
 
                 # paso 2 (INCONSISTENCIAS)
                 # funciona con el left anti join
-                union_unique = union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber'])
-                df_duplicates = union.subtract(union_unique).select( 'servicePointId','deviceId','meteringType'
+                union_unique = df_union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber'])
+                df_duplicates = df_union.subtract(union_unique).select( 'servicePointId','deviceId','meteringType'
                                                                 ,'variableId','readingLocalTime','logNumber')
                 df_final = union_unique.join(df_duplicates, [(union_unique.servicePointId == df_duplicates.servicePointId)
                                                         , (union_unique.deviceId == df_duplicates.deviceId)
@@ -170,10 +170,10 @@ def cleaner(union, spark):
                                                         ,how = 'left_anti').coalesce(1)
                 # con esta linea salvamos la union entre nulos de pyspark, (union_unique.logNumber.eqNullSafe(df_duplicates.logNumber))
 
-                df_logs_aux = union.subtract(union_unique).withColumn("Descripcion_log",lit("Valores inconsitentes")).coalesce(1)
+                df_logs_aux = df_union.subtract(union_unique).withColumn("Descripcion_log",lit("Valores inconsitentes")).coalesce(1)
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
-                union = df_final
+                df_union = df_final
 
 
 
@@ -191,9 +191,9 @@ def cleaner(union, spark):
 
         # PARTE 5: RELLENO DE CEROS Y NULOS
 
-        if check_empty(union.filter(union.readingType == "LOAD PROFILE READING")):
+        if check_empty(df_union.filter(df_union.readingType == "LOAD PROFILE READING")):
                 # Se trabaja solo para los datos de LOAD PROFILE READING
-                df_load_profile = union.filter(union.readingType == "LOAD PROFILE READING")
+                df_load_profile = df_union.filter(df_union.readingType == "LOAD PROFILE READING")
                 # Crear columna quality_flag
                 df_load_profile = df_load_profile.withColumn("quality_flag", concat(col("qualityCodesSystemId"),lit("-"),col("qualityCodesCategorization"),lit("-"),col("qualityCodesIndex")))
 
@@ -352,7 +352,7 @@ def cleaner(union, spark):
                 # selecciona las columnas en el orden que van y ademas hacer el union con el df original filtrado por
                 # los otros tipos de lecturas
 
-                df_registers_events = union.filter((union.readingType == "REGISTERS") | (union.readingType == "EVENTS"))
+                df_registers_events = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "EVENTS"))
                 df_registers_events = df_registers_events.withColumn("validacion_intervalos",lit(""))
 
                 lista_columnas = ["servicePointId","readingType","variableId","deviceId","meteringType","readingUtcLocalTime","readingDateSource","readingLocalTime","dstStatus"
@@ -365,7 +365,7 @@ def cleaner(union, spark):
                 df_load_profile = df_load_profile.select(*lista_columnas)
                 df_registers_events = df_registers_events.select(*lista_columnas)
 
-                union = df_load_profile.union(df_registers_events).coalesce(1)
+                df_union = df_load_profile.union(df_registers_events).coalesce(1)
 
         
         # PARTE 6: VALIDACION DE INTERVALOS
@@ -374,7 +374,7 @@ def cleaner(union, spark):
 
 
         # escribir csv
-        union.write.format('csv').mode("overwrite").save("./output/cleaned", header="true", emptyValue="")
+        df_union.write.format('csv').mode("overwrite").save("./output/cleaned", header="true", emptyValue="")
         df_logs.write.format('csv').mode("overwrite").save("./output/cleaning_dump", header="true", emptyValue="")
 
-        return union
+        return df_union

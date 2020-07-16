@@ -2056,10 +2056,10 @@ def translator(xml_file_path,spark):
     if status_data.isEmpty() == False:
             readings_list.append(status_data_readings)
 
-    union = union_all(*readings_list).coalesce(1) #Aca los estoy uniendo en una sola partición, si se saca el .coalesce(1) se van a crear distintas particiones para c/u
+    df_union = union_all(*readings_list).coalesce(1) #Aca los estoy uniendo en una sola partición, si se saca el .coalesce(1) se van a crear distintas particiones para c/u
 
     # Se unen los 4 campos: ct, pt, ke y sf en un solo campo con el nombre Multipliers
-    union = union.withColumn("multiplier",
+    df_union = df_union.withColumn("multiplier",
                             concat(
                                     lit("'MultiplierValues':{'ke':'"), \
                                     col("ke"), \
@@ -2068,10 +2068,10 @@ def translator(xml_file_path,spark):
                             )
     # Se dropean las columnas que se unieron en el paso anterior
     columns_to_drop = ['ct', 'pt', 'ke', 'sf']
-    union = union.drop(*columns_to_drop)
+    df_union = df_union.drop(*columns_to_drop)
 
 
-    union = union.withColumn("_IsActive", 
+    df_union = df_union.withColumn("_IsActive", 
                     when(col("_IsActive") == True, "ENABLE") \
                     .when(col("_IsActive") == False, "DISABLE") \
                     .otherwise(None)) \
@@ -2152,11 +2152,11 @@ def translator(xml_file_path,spark):
 
 
     # los campos relationStartDate y relationEndDate no deben ir nulos, sino con el valor string vacio ('')
-    union = union.fillna( { 'relationStartDate':'', 'relationEndDate':'' } )
+    df_union = df_union.fillna( { 'relationStartDate':'', 'relationEndDate':'' } )
 
     # Las filas que tengan el valor variableId nulo, no sirven, por lo que se tiran
     # Preguntar que hacemos en este caso a primestone, si las tiramos forever o es cambiarlas de bucket
-    union = union.filter(union.variableId.isNotNull())
+    df_union = df_union.filter(df_union.variableId.isNotNull())
 
     # Reemplazo los valores de unitOfMeasure por su codigo
     dic_uom = {"kW":"96",
@@ -2184,14 +2184,14 @@ def translator(xml_file_path,spark):
         "Hz":"97",
         "°":"98"}
 
-    union = union.replace(dic_uom, subset=["unitOfMeasure"])
+    df_union = df_union.replace(dic_uom, subset=["unitOfMeasure"])
 
     # Cambio tipo de datos.
-    union = union.withColumn("channel",union["channel"].cast(IntegerType()))
-    union = union.withColumn("unitOfMeasure",union["unitOfMeasure"].cast(IntegerType()))
-    union = union.withColumn("intervalSize",union["intervalSize"].cast(IntegerType()))
-    union = union.withColumn("logNumber",union["logNumber"].cast(IntegerType()))
+    df_union = df_union.withColumn("channel",df_union["channel"].cast(IntegerType()))
+    df_union = df_union.withColumn("unitOfMeasure",df_union["unitOfMeasure"].cast(IntegerType()))
+    df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
+    df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
 
-    union.write.format('csv').mode("overwrite").save("./output/translated", header="true", emptyValue="")
+    df_union.write.format('csv').mode("overwrite").save("./output/translated", header="true", emptyValue="")
     
-    return union
+    return df_union
