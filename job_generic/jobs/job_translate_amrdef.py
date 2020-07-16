@@ -1450,7 +1450,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
     #OutageCountSummary tiene un previous reading time y un reading time, cada uno tiene que generar una lectura.
     ######################################################################################################################################################
-    previousOutageCountReadings = df.withColumn("Value", col("OutageCountSummary.OutageCount._Value")) \
+    previous_outage_count_readings = df.withColumn("Value", col("OutageCountSummary.OutageCount._Value")) \
                                     .withColumn("PreviousReadingTime", col("OutageCountSummary.OutageCount._PreviousReadingTime")) \
                                     .withColumn("FixedAttribute_unitOfMeasure", lit("Count")) \
                                     .withColumn("FixedAttribute_variableId", lit("Outage count")) \
@@ -1523,7 +1523,7 @@ def translator(xml_file_path,spark):
                                             "Meter._MediaType",
                                             "Meter._InstallDate",
                                             "Meter._RemovalDate") 
-    previousOutageCountReadings = previousOutageCountReadings.withColumn("tmp", arrays_zip("PreviousReadingTime","Value")) \
+    previous_outage_count_readings = previous_outage_count_readings.withColumn("tmp", arrays_zip("PreviousReadingTime","Value")) \
                                                             .withColumn("tmp", explode("tmp")) \
                                                             .withColumn("MeterReadings_Source", 
                                                             when(col("MeterReadings_Source") == "Visual", lit("Visual")) \
