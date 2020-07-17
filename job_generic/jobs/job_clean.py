@@ -254,7 +254,8 @@ def cleaner(df_union, spark):
                         lista = [min_ts]
                         for rep in range(1,mins//interval):
                                 lista.append(min_ts + timedelta(minutes = rep*interval))
-                        lista.append(max_ts)
+                        if min_ts != max_ts:
+                                lista.append(max_ts)
 
                         all_elem = [fecha.strftime('%Y-%m-%d %H:%M:%S') for fecha in lista]
                         all_elem = ",".join(all_elem)
