@@ -32,7 +32,7 @@ def translator(xml_file_path,spark):
     hes = filename.split("/")[1]
     owner = filename.split("/")[0]
 
-    df = spark.read.format("com.databricks.spark.xml").options(root_tag=root_tag).options(row_tag=row_tag).options(nullValue="").options(valueTag="_valueTag").option("columnNameOfCorruptRecord", "algunNombre") \
+    df = spark.read.format("com.databricks.spark.xml").options(rootTag=root_tag).options(rowTag=row_tag).options(nullValue="").options(valueTag="_valueTag").option("columnNameOfCorruptRecord", "algunNombre") \
         .schema(schema)\
         .load(xml_file_path)
 
