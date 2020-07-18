@@ -20,9 +20,10 @@ def start_spark(app_name='my_spark_app', config='localhost', jar_packages=[],
 
     spark = SparkSession.builder \
         .appName(app_name).config("localhost") \
+        .config("spark.jars", "./dependencies/spark-xml_2.12-0.9.0.jar") \
         .getOrCreate()
-
     sc = SparkContext.getOrCreate()
+    
 
 
     return spark, sc

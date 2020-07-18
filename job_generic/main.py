@@ -1,6 +1,6 @@
-from job_translate_amrdef import translator
-from  job_enrich import enricher
-from  job_clean import cleaner
+from  jobs.job_translate_amrdef import translator
+from  jobs.job_enrich import enricher
+from  jobs.job_clean import cleaner
 
 from dependencies.spark import start_spark
 
@@ -13,7 +13,7 @@ def main():
         config='localhost')
     
     # job-translate-amrdef
-    data = translator("file:////home/ivan/Documents/Primestone/Esquemas/AMRDEF_sample_modif_flags.xml",spark)
+    data = translator("./data/AMRDEF_sample_modif_flags.xml",spark)
     print("\n"*10,"data translation done","\n"*10)
     
     # job-enrich

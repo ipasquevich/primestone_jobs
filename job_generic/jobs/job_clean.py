@@ -41,7 +41,6 @@ def cleaner(df_union, spark):
 
         lista_apagon = req_config["QualityCode"]["PowerOutage"]
 
-
         def check_empty(df):
                 return len(df.head(1)) > 0
 
@@ -50,7 +49,9 @@ def cleaner(df_union, spark):
         # PARTE 1: FLAGS
         #descarte de banderas, si alguna es false, se descarta el registro (se guarda en otro dataframe que se 
         # va a usar para crear los logs)
-
+        print(df_union.head(1))
+        print(len(df_union.head(1)))
+        print(len(df_union.head(1))>0)
         if check_empty(df_union):
                 # primero revisamos por la bandera de estado de asociacion, si esta es falsa todos los registros con dicha condicion
                 # van a separarse el dataframe original para ir al dataframe de logs
@@ -87,7 +88,12 @@ def cleaner(df_union, spark):
                 def pasado_futuro(row):
                         last_date = datetime.strptime(row.lastReadDate[:10],date_format)
                         asoc = datetime.strptime(row.relationStartDate[:10],date_format)
-                        reading_time = datetime.strptime(row.readingUtcLocalTime[:10],date_format)
+                        #### Reading Time is empty!??!?!#### CHARLY
+                        if row.readingUtcLocalTime is not None:
+                                reading_time = datetime.strptime(row.readingUtcLocalTime[:10],date_format)
+                        else:
+                                reading_time = last_date
+                        #### Reading Time is empty!??!?!#### CHARLY
                         if (asoc - last_date).days > 0:
                                 last_date = asoc
 

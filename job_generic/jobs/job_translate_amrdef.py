@@ -4,7 +4,7 @@ import random
 from pyspark.sql import SparkSession, DataFrame, Row
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType 
 from pyspark.sql.functions import col, lit, udf, when, explode, arrays_zip, concat
-from pyspark import SparkContext ,SparkConf
+from pyspark import SparkContext, SparkConf
 from functools import reduce 
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -15,7 +15,7 @@ def translator(xml_file_path,spark):
     root_tag = "AMRDEF"
     row_tag = "MeterReadings"
 
-    str_sch = spark.read.text("../configs/schemaAMRDEF_sim_allstring.json").first()[0]
+    str_sch = spark.read.text("./configs/schemaAMRDEF_sim_allstring.json").first()[0]
     schema = StructType.fromJson(json.loads(str_sch))
 
     bucket = "s3://primestone-raw-dev/"
@@ -1818,7 +1818,7 @@ def translator(xml_file_path,spark):
     ######################################################################################################################################################
 
     ######################################################################################################################################################
-    interval_data = []
+    interval_data_list = []
     for row in df.rdd.collect():
             if row.Meter != None:
                     meter_readings_source = row._Source
@@ -1914,7 +1914,7 @@ def translator(xml_file_path,spark):
                                                             qualitycode_categorization = "5"
                                                             qualitycode_index = "256"
 
-                                            interval_data.append ({
+                                            interval_data_list.append ({
                                                     "servicePointId":service_point_id,
                                                     "readingType":"LOAD PROFILE READING",
                                                     "variableId":interval_spec_uom + ' ' + interval_spec_direction,
@@ -1956,10 +1956,10 @@ def translator(xml_file_path,spark):
                                                     "_InstallDate":str(meter_install_date),
                                                     "_RemovalDate":str(meter_removal_date)
                                                     })
-    interval_data = spark.sparkContext.parallelize(interval_data) \
+    interval_data_list = spark.sparkContext.parallelize(interval_data_list) \
                             .map(lambda x: Row(**OrderedDict(x.items())))
-    if interval_data.isEmpty() == False:
-            interval_data_readings = spark.createDataFrame(interval_data.coalesce(1)) \
+    if interval_data_list.isEmpty() == False:
+            interval_data_readings = spark.createDataFrame(interval_data_list.coalesce(1)) \
                                     .withColumn("primarySource", 
                                             when(col("primarySource") == "Visual", lit("Visual")) \
                                             .when(col("primarySource") == "Remote", lit("Remoto")) \
@@ -2050,7 +2050,7 @@ def translator(xml_file_path,spark):
             load_profile_summary_readings, outage_count_readings, \
             reverse_energy_summary_readings, events_data_readings ]
 
-    if interval_data.isEmpty() == False:
+    if interval_data_list.isEmpty() == False:
             readings_list.append(interval_data_readings)
 
     if status_data.isEmpty() == False:
