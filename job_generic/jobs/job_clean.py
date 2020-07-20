@@ -82,6 +82,12 @@ def cleaner(union, spark):
 
         if check_empty(union):
 
+                # En los regustros donde el campo readingUtcLocalTime sea nulo, no vamos a poder hacer ninguna validacion, por lo que l
+                # los descartamos del df original y los agragamos a los logs
+                union = union.filter(union.readingUtcLocalTime.isNotNull())
+                df_logs_aux = union.filter(union.readingUtcLocalTime.isNull()).withColumn("Descripcion_log",lit("readingUtcLocalTime NULO"))
+                df_logs = df_logs.union(df_logs_aux).coalesce(1)        
+
                 # creamos la funcion para aplicar a cada fila del df
                 hoy = datetime.today()
                 date_format = '%Y-%m-%d'
