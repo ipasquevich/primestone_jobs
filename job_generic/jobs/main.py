@@ -14,7 +14,7 @@ def main():
         config='localhost')
     
     # job-translate-amrdef
-    data = translator("file:////home/ivan/Documents/Primestone/Esquemas/AMRDEF_sample_modif_flags.xml",spark)
+    data = translator("file:////home/ivan/Documents/Primestone/Esquemas/AMRDEF_sample_modif_flags_actualdates.xml",spark)
     print("\n"*10,"data translation done","\n"*10)
     
     # job-enrich
@@ -30,4 +30,5 @@ if __name__ == '__main__':
     main()
 
 
-# spark-submit --jars='/home/ivan/Documents/Primestone/Scripts/spark-xml_2.11-0.4.1.jar' --py-files packages.zip  main.py
+#spark-submit --jars='/home/ivan/Documents/Primestone/Scripts/spark-xml_2.11-0.4.1.jar' --py-files='../packages.zip'  main.py
+

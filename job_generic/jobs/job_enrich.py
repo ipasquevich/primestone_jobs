@@ -1,6 +1,3 @@
-
-#import atexit
-#import logging
 import boto3
 import io
 import time
@@ -9,7 +6,7 @@ import json
 import random
 from pyspark.sql import SparkSession, DataFrame, Row
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
-from pyspark.sql.functions import *
+from pyspark.sql.functions import udf, struct
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
@@ -17,36 +14,13 @@ from datetime import datetime, timedelta
 from urllib import request, parse
 
 
-def enricher(union,spark):
-    
-    """
-    #Función para escribir en s3 logs
-    def write_logs(body, bucket, key):
-        session = boto3.Session(profile_name="crossingover")
-        s3 = session.client("s3")
-        s3.put_object(Body=body, Bucket=bucket, Key=key)
-
-    #armo el logger
-    log = logging.getLogger("Enrich")
-    log_stringio = io.StringIO()
-    handler = logging.StreamHandler(log_stringio)
-    log.addHandler(handler)
-    #defino el nivel de logging
-    logging.basicConfig(level=logging.INFO)
-    """
-
-    # bloque fecha
-    day = datetime.now()
-    day = day.strftime("%Y-%m-%d %H:%M:%S.%f")
-
-    #bloque tiempo
-    start = time.time()
+def enricher(df_union,spark):
 
     # Creacion del diccionario para el request
 
-    hes = union.head().readingsSource
-    owner = union.head().owner
-    guid = union.head().guidFile
+    hes = df_union.head().readingsSource
+    owner = df_union.head().owner
+    guid = df_union.head().guidFile
     
     dicc = {"owner": {
                             "hes": hes,
@@ -58,23 +32,23 @@ def enricher(union,spark):
 
     # creo el dataframe con valores unicos tanto de servicePointId como de deviceId
 
-    df_relationDevice = union.dropDuplicates((["servicePointId","deviceId"]))
-    df_servicePoint = df_relationDevice.dropDuplicates((["servicePointId"]))
-    df_device = df_relationDevice.dropDuplicates((["deviceId"]))
+    df_relation_device = df_union.dropDuplicates((["servicePointId","deviceId"]))
+    df_service_point = df_relation_device.dropDuplicates((["servicePointId"]))
+    df_device = df_relation_device.dropDuplicates((["deviceId"]))
 
-    df_servicePointVariable_prof = union.filter(union.readingType == "LOAD PROFILE READING")
-    df_servicePointVariable_prof = df_servicePointVariable_prof.dropDuplicates((["readingType","variableId","servicePointId"
+    df_service_point_variable_prof = df_union.filter(df_union.readingType == "LOAD PROFILE READING")
+    df_service_point_variable_prof = df_service_point_variable_prof.dropDuplicates((["readingType","variableId","servicePointId"
                                     ,"meteringType","unitOfMeasure","logNumber","channel","intervalSize"]))
 
-    df_servicePointVariable_regEvent = union.filter((union.readingType == "REGISTERS") | (union.readingType == "EVENTS"))
-    df_servicePointVariable_regEvent = df_servicePointVariable_regEvent.dropDuplicates((["readingType","variableId","servicePointId",
+    df_service_point_variable_reg_event = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "EVENTS"))
+    df_service_point_variable_reg_event = df_service_point_variable_reg_event.dropDuplicates((["readingType","variableId","servicePointId",
                                     "meteringType","unitOfMeasure"]))
 
 
     # genero el diccionario del request
 
     lista_aux = []
-    for row in df_servicePoint.rdd.collect():
+    for row in df_service_point.rdd.collect():
             dicc_aux = { "servicePointId": row.servicePointId }
             lista_aux.append(dicc_aux)
     dicc["servicePoint"] = lista_aux
@@ -96,7 +70,7 @@ def enricher(union,spark):
 
 
     lista_aux = []
-    for row in df_relationDevice.rdd.collect():
+    for row in df_relation_device.rdd.collect():
             dicc_aux = {
                                     "servicePointId": row.servicePointId,
                                     "deviceId": row.deviceId,
@@ -109,7 +83,7 @@ def enricher(union,spark):
 
 
     lista_aux = []
-    for row in df_servicePointVariable_prof.rdd.collect():
+    for row in df_service_point_variable_prof.rdd.collect():
             dicc_aux = {
                                     "readingType": row.readingType,
                                     "variableId": row.variableId,
@@ -123,7 +97,7 @@ def enricher(union,spark):
             lista_aux.append(dicc_aux)
 
     lista_aux_2 = []
-    for row in df_servicePointVariable_regEvent.rdd.collect():
+    for row in df_service_point_variable_reg_event.rdd.collect():
             dicc_aux = {
                                     "readingType": row.readingType,
                                     "variableId": row.variableId,
@@ -176,41 +150,41 @@ def enricher(union,spark):
     # Con el json levantado necesito extraer los datos para cruzar con el dataframe que tenemos
     # Extraigo los valores del diccionario en dos listas
 
-    lista_relationDevice = [[item["servicePointId"],item["deviceId"],item["result"],item["relationStartDate"]]
+    lista_relation_device = [[item["servicePointId"],item["deviceId"],item["result"],item["relationStartDate"]]
                             for item in req["relationDevice"]]
 
-    lista_servicePointVariable = [[item["readingType"],item["variableId"],item["servicePointId"],item["result"],
+    lista_service_point_variable = [[item["readingType"],item["variableId"],item["servicePointId"],item["result"],
                                 item["toStock"],item["lastReadDate"]]
                                 for item in req["servicePointVariable"] ]
 
     # Creo un dataframe por lista
 
-    Schema_relationDevice = StructType([StructField("servicePointId", StringType())\
+    schema_relation_device = StructType([StructField("servicePointId", StringType())\
                         ,StructField("deviceId", StringType())\
                         ,StructField("result_rD", BooleanType())\
                         ,StructField("relationStartDate", StringType())])
 
-    df_relationDevice = spark.createDataFrame(lista_relationDevice,schema=Schema_relationDevice)
+    df_relation_device = spark.createDataFrame(lista_relation_device,schema=schema_relation_device)
 
 
 
-    Schema_servicePointVariable = StructType([StructField("readingType", StringType())\
+    schema_service_point_variable = StructType([StructField("readingType", StringType())\
                             ,StructField("variableId", StringType())\
                             ,StructField("servicePointId", StringType())\
                             ,StructField("result_sPV", BooleanType())\
                             ,StructField("toStock", BooleanType())\
                             ,StructField("lastReadDate", StringType())])
                             
-    df_servicePointVariable = spark.createDataFrame(lista_servicePointVariable,schema=Schema_servicePointVariable)
+    df_service_point_variable = spark.createDataFrame(lista_service_point_variable,schema=schema_service_point_variable)
 
     #IMPORTANTE 
     # elimino la columna relationStartDate porque en el paso siguiente hago el join con los valores enriquecidos
     # y la vuelvo a obtener (con valores actualizados)
-    union = union.drop("relationStartDate")
+    df_union = df_union.drop("relationStartDate")
 
     # hago un inner join de los dataframes creados con el dataframe original (enrichment)
-    union = union.join(df_relationDevice, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
-    union = union.join(df_servicePointVariable, on=['variableId',"servicePointId","readingType"], how='inner').coalesce(1)
+    df_union = df_union.join(df_relation_device, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
+    df_union = df_union.join(df_service_point_variable, on=['variableId',"servicePointId","readingType"], how='inner').coalesce(1)
 
 
     # bloque calculo de readingUtcLocalTime
@@ -218,7 +192,7 @@ def enricher(union,spark):
     # para la conversion necesito tomar el valor de servicePointTimeZone
 
     # Si hay registros con valores nulos en servicePointTimeZone entonces no van a servir para el analisis y hay que eliminarlos
-    union = union.filter(union.servicePointTimeZone.isNotNull())
+    df_union = df_union.filter(df_union.servicePointTimeZone.isNotNull())
 
     # defino el diccionario con las transformaciones para cada codigo
     utc_dicc = {
@@ -285,34 +259,14 @@ def enricher(union,spark):
                     fecha = datetime.strptime(row.readingLocalTime,'%Y-%m-%d %H:%M:%S')
                     fecha = fecha - timedelta(hours = utc_dicc[row.servicePointTimeZone])
                     return fecha.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                    pass
 
     # Aplico la funcion al dataframe
     udf_object = udf(conversor_utc, StringType())
-    union = union.withColumn("readingUtcLocalTime", udf_object(struct([union[x] for x in union.columns])))
+    df_union = df_union.withColumn("readingUtcLocalTime", udf_object(struct([df_union[x] for x in df_union.columns])))
 
 
     # escribo los csv
-    union.write.format('csv').mode("overwrite").save("./output/enriched", header="true", emptyValue="")
+    df_union.write.format('csv').mode("overwrite").save("./output/enriched", header="true", emptyValue="")
 
 
-    return union
-
-
-    #bloque tiempo
-    dur = str(time.time() - start)
-    dur = ".".join((dur.split(".")[0],dur.split(".")[1][:3]))
-
-    message = guid +'-'+ hes + filename + ' | ' + "System" + ' | ' + owner + ' | '  + day + ' | ' + "Enrich job finished for file" + ' | ' + "INFO" + ' | '  + "Enrich" + ' | '  + dur + " seconds" + ' | ' + str(union.count()) + ' rows processed' + ' | ' + "Succesful"
-
-    union.printSchema()
-    """
-    #este log sale
-    log.info(message)
-
-    #escribe todo en s3
-    atexit.register(write_logs, body=log_stringio.getvalue(), bucket="test-charly-bucket-s3", key="logtest")
-
-    quit()
-    """
+    return df_union
