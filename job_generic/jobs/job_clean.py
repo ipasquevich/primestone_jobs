@@ -533,7 +533,7 @@ def cleaner(df_union, spark):
                 ,"version","readingsValue","primarySource","readingsSource","owner","guidFile","estatus"
                 ,"registersNumber","eventsCode","agentId","agentDescription","multiplier","deviceMaster","deviceDescription","deviceStatus"
                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
-                ,"deviceType","brand","model","validacion_intervalos"]
+                ,"deviceType","brand","model","validacion_intervalos","usageReading","estimationReading","estimationValid","editionReading","editionValid"]
 
                 df_load_profile = df_load_profile.select(*lista_columnas)
                 df_registers_events = df_registers_events.select(*lista_columnas)
