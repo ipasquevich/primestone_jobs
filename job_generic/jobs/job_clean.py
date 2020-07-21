@@ -547,9 +547,9 @@ def cleaner(df_union, spark):
         if check_empty(df_union.filter(df_union.readingType == "LOAD PROFILE READING")):
                 df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
 
-                df_LoadProfile = df_union.filter(df_union.readingType == "LOAD PROFILE READING")
+                df_loadprofile = df_union.filter(df_union.readingType == "LOAD PROFILE READING")
 
-                variables_id = df_LoadProfile.select("variableId").distinct().collect()
+                variables_id = df_loadprofile.select("variableId").distinct().collect()
                 variables_id = [row.variableId for row in variables_id]
 
 
@@ -557,46 +557,46 @@ def cleaner(df_union, spark):
                 # aca empieza el ciclo for por cada elemento de la variable variable_Id
                 for iteracion,variable in enumerate(variables_id):
 
-                        df_LP = df_LoadProfile.filter(df_LoadProfile.variableId == variable)
+                        df_lp = df_loadprofile.filter(df_loadprofile.variableId == variable)
 
                         # obtengo los limites de los tiempos y los paso a timestamp
-                        max_ts = datetime.strptime((df_LP.agg(max('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
-                        min_ts = datetime.strptime((df_LP.agg(min('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
+                        max_ts = datetime.strptime((df_lp.agg(max('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
+                        min_ts = datetime.strptime((df_lp.agg(min('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
                         delta = max_ts - min_ts
 
                         # interval indica el intervalo en minutos
-                        interval = df_LP.select("intervalSize").first()[0]
+                        interval = df_lp.select("intervalSize").first()[0]
                         mins = delta.seconds//60
                         cant_lecturas = (mins//interval) + 1
 
-                        if df_LP.filter(df_LP.validacion_intervalos.isNotNull()).count() == cant_lecturas:
-                                df_LP = df_LP.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
+                        if df_lp.filter(df_lp.validacion_intervalos.isNotNull()).count() == cant_lecturas:
+                                df_lp = df_lp.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
                         else:
-                                df_LP_success = df_LP.filter(df_LP.validacion_intervalos.isNotNull())
-                                df_LP_success = df_LP_success.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
+                                df_lp_success = df_lp.filter(df_lp.validacion_intervalos.isNotNull())
+                                df_lp_success = df_lp_success.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
 
-                                df_LP_failure = df_LP.filter(df_LP.validacion_intervalos.isNull())
-                                df_LP_failure = df_LP_failure.withColumn("usageValid",lit(False))\
+                                df_lp_failure = df_lp.filter(df_lp.validacion_intervalos.isNull())
+                                df_lp_failure = df_lp_failure.withColumn("usageValid",lit(False))\
                                                         .withColumn("ValidationDetail",lit('{"Usage":{"IntervalsError":"Interval not exist"}}'))\
                                                         .withColumn("IsGrouped",lit(False))
 
-                                df_LP = df_LP_success.union(df_LP_failure).coalesce(1)
-                                df_LP = df_LP.orderBy("readingUtcLocalTime",ascending=True)
+                                df_lp = df_lp_success.union(df_lp_failure).coalesce(1)
+                                df_lp = df_lp.orderBy("readingUtcLocalTime",ascending=True)
 
 
                         if iteracion == 0:
-                                df_LoadProfile_final = df_LP
+                                df_loadprofile_final = df_lp
                         else:
-                                df_LoadProfile_final = df_LoadProfile.union(df_LP).coalesce(1)
+                                df_loadprofile_final = df_loadprofile_final.union(df_lp).coalesce(1)
 
 
-                df_LoadProfile = df_LoadProfile_final
+                df_loadprofile = df_loadprofile_final
 
                 # selecciona las columnas en el orden que van y ademas hacer el union con el df original filtrado por
                 # los otros tipos de lecturas
 
-                df_Registers_Events = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "EVENTS"))
-                df_Registers_Events = df_Registers_Events.withColumn("usageValid",lit(None))\
+                df_registers_events = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "EVENTS"))
+                df_registers_events = df_registers_events.withColumn("usageValid",lit(None))\
                                                         .withColumn("ValidationDetail",lit(""))\
                                                         .withColumn("IsGrouped",lit(None))
 
@@ -607,10 +607,10 @@ def cleaner(df_union, spark):
                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
                 ,"deviceType","brand","model","usageReading","usageValid","ValidationDetail","IsGrouped","estimationReading","estimationValid","editionReading","editionValid"]
 
-                df_LoadProfile = df_LoadProfile.select(*lista_columnas)
-                df_Registers_Events = df_Registers_Events.select(*lista_columnas)
+                df_loadprofile = df_loadprofile.select(*lista_columnas)
+                df_registers_events = df_registers_events.select(*lista_columnas)
 
-                df_union = df_LoadProfile.union(df_Registers_Events).coalesce(1)
+                df_union = df_loadprofile.union(df_registers_events).coalesce(1)
 
                 df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso6", header="true", emptyValue="")
 
