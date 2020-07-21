@@ -81,6 +81,13 @@ def cleaner(df_union, spark):
 
         if check_empty(df_union):
 
+                # En los regustros donde el campo readingUtcLocalTime sea nulo, no vamos a poder hacer ninguna validacion, por lo que l
+                # los descartamos del df original y los agragamos a los logs
+                df_union = df_union.filter(df_union.readingUtcLocalTime.isNotNull())
+                df_logs_aux = df_union.filter(df_union.readingUtcLocalTime.isNull()).withColumn("Descripcion_log",lit("readingUtcLocalTime NULO"))
+                df_logs = df_logs.df_union(df_logs_aux).coalesce(1)
+
+
                 # creamos la funcion para aplicar a cada fila del df
                 hoy = datetime.today()
                 date_format = '%Y-%m-%d'
@@ -88,12 +95,7 @@ def cleaner(df_union, spark):
                 def pasado_futuro(row):
                         last_date = datetime.strptime(row.lastReadDate[:10],date_format)
                         asoc = datetime.strptime(row.relationStartDate[:10],date_format)
-                        #### Reading Time is empty!??!?!#### CHARLY
-                        if row.readingUtcLocalTime is not None:
-                                reading_time = datetime.strptime(row.readingUtcLocalTime[:10],date_format)
-                        else:
-                                reading_time = last_date
-                        #### Reading Time is empty!??!?!#### CHARLY
+                        reading_time = datetime.strptime(row.readingUtcLocalTime[:10],date_format)
                         if (asoc - last_date).days > 0:
                                 last_date = asoc
 
@@ -305,7 +307,7 @@ def cleaner(df_union, spark):
                         df_final = df_final.withColumn("version_ref", udf_object(struct([df_final[x] for x in df_final.columns])))
 
                         # logs y df resultante en base a los valores devueltos por la funcion de versionamiento
-                        df_logs = df_final.filter(df_final.version_ref.isNull()).withColumn("Descripcion_log",lit("Versionamiento duplicados"))
+                        #df_logs = df_final.filter(df_final.version_ref.isNull()).withColumn("Descripcion_log",lit("Versionamiento duplicados"))
 
                         df_final = df_final.filter(df_final.version_ref.isNotNull())
                         df_final = df_final.drop("version").withColumnRenamed("version_ref", 'version')
@@ -350,7 +352,7 @@ def cleaner(df_union, spark):
                 df_union = df_union.union(df_final).coalesce(1)
 
                 # logs
-                # ver agragar las columnas en los logs
+                # ver agregar las columnas en los logs
                 #lista_columnas_logs = lista_columnas[:-1]
                 #lista_columnas_logs.append("Descripcion_log")
                 #df_logs = df_logs.select(*lista_columnas_logs)
