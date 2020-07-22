@@ -16,6 +16,13 @@ from urllib import request, parse
 
 def enricher(df_union,spark):
 
+    # Cambio tipo de datos.
+    df_union = df_union.withColumn("channel",df_union["channel"].cast(IntegerType()))
+    df_union = df_union.withColumn("unitOfMeasure",df_union["unitOfMeasure"].cast(IntegerType()))
+    df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
+    df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
+
+
     # Creacion del diccionario para el request
 
     hes = df_union.head().readingsSource

@@ -85,7 +85,7 @@ def cleaner(df_union, spark):
                 # los descartamos del df original y los agragamos a los logs
                 df_union = df_union.filter(df_union.readingUtcLocalTime.isNotNull())
                 df_logs_aux = df_union.filter(df_union.readingUtcLocalTime.isNull()).withColumn("Descripcion_log",lit("readingUtcLocalTime NULO"))
-                df_logs = df_logs.df_union(df_logs_aux).coalesce(1)
+                df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
 
                 # creamos la funcion para aplicar a cada fila del df
