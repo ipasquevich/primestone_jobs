@@ -14,7 +14,10 @@ from urllib import request, parse
 # BLOQUE CLEANING
 
 def cleaner(df_union, spark):
-
+        
+        # Cambio el tipo de datos
+        df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
+        
         #Hago el request para traer el json de configuracion
         base_url = "http://80f56133-default-platforms-88e5-2108999998.us-east-1.elb.amazonaws.com/platform_settings/get_configuration"
 
