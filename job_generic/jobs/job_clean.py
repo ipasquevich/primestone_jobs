@@ -47,7 +47,74 @@ def cleaner(df_union, spark):
         def check_empty(df):
                 return len(df.head(1)) > 0
 
+        # Defino diccionario y la funcion para el paso de utc a readinglocaltime, esto se usa en el paso 5 
 
+        utc_dicc = {
+            '0': -12,
+            '1': -11,
+            '2': -10,
+            '3': -9,
+            '4': -8,
+            '5': -7,
+            '6': -7,
+            '7': -6,
+            '8': -6,
+            '9': -6,
+            '10': -5,
+            '11': -5,
+            '12': -5,
+            '13': -4,
+            '14': -4,
+            '15': -3.5,
+            '16': -3,
+            '17': -3,
+            '18': -2,
+            '19': -1,
+            '20': 0,
+            '21': 0,
+            '22': 1,
+            '23': 1,
+            '24': 1,
+            '25': 2,
+            '26': 2,
+            '27': 2,
+            '28': 2,
+            '29': 2,
+            '30': 3,
+            '31': 3,
+            '32': 3.5,
+            '33': 4,
+            '34': 4.5,
+            '35': 5,
+            '36': 5.5,
+            '37': 6,
+            '38': 7,
+            '39': 8,
+            '40': 8,
+            '41': 9,
+            '42': 9.5,
+            '43': 9.5,
+            '44': 10,
+            '45': 10,
+            '46': 10,
+            '47': 11,
+            '48': 12,
+            '49': 12,
+            '50': -8,
+            '51': -7,
+            '52': -6,
+            '53': -6,
+            '54': -6,
+            '55': -6,
+            '56': 10}
+
+        def conversor_utc_local(row):
+                if not(row.readingLocalTime):
+                        fecha = datetime.strptime(row.readingUtcLocalTime,'%Y-%m-%d %H:%M:%S')
+                        fecha = fecha + timedelta(hours = utc_dicc[row.servicePointTimeZone])
+                        return fecha.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                        return row.readingLocalTime
 
         # PARTE 1: FLAGS
         #descarte de banderas, si alguna es false, se descarta el registro (se guarda en otro dataframe que se 
@@ -521,6 +588,13 @@ def cleaner(df_union, spark):
 
 
                 df_load_profile = df_load_profile_final.withColumnRenamed("complete_interval","readingUtcLocalTime").withColumnRenamed("readingLocalTime_ref","readingLocalTime") .withColumnRenamed("readingDateSource_ref","readingDateSource").withColumnRenamed("qualityCodesSystemId_ref","qualityCodesSystemId").withColumnRenamed("qualityCodesCategorization_ref","qualityCodesCategorization").withColumnRenamed("qualityCodesIndex_ref","qualityCodesIndex").withColumnRenamed("readingsValue_ref","readingsValue")
+
+
+                # Aplico la funcion de transformacion de fechas al dataframe, para obtener todos los valores de readingLocalTime
+                # y readingDateSource
+                udf_object = udf(conversor_utc_local, StringType())
+                df_load_profile = df_load_profile.withColumn("readingLocalTime", udf_object(struct([df_load_profile[x] for x in df_load_profile.columns])))\
+                                                .withColumn("readingDateSource", col("readingLocalTime"))
 
                 # selecciona las columnas en el orden que van y ademas hacer el union con el df original filtrado por
                 # los otros tipos de lecturas
