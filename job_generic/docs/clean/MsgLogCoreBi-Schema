@@ -1,0 +1,25 @@
+  "target": "sqs-logging",
+  "eventType": "pap-log.business",
+  "data": [
+    {
+		"message":" ", //Dummy
+		"logLevel":" ", //Info
+		"category": [ 
+		{
+		    "category_name":"TransferToRAW|RAWToGRO|ReadingsProcessing|ReadingsProcessingLifecycle",
+			"guid_file": "IdFile", 
+			"action": "NullFilling|ZeroFilling|Discard|Discard lapse time|Interval Validation",
+			"start_timestamp": "21/01/2020 6:00:00,000",
+			"end_timestamp": "21/01/2020 10:00:00,000",
+			##Según aplique
+			
+		}],
+		"hes": "XXXXX"
+    {   
+  ],
+  "source": "NIFI|TRANSLATE|ENRICHMENT|CLEANING|VALIDATION",
+  "owner": "ALL",
+  "transactionId": "384152ff-9c20-40a8-97c1-e97716a71226",
+  "userId": "0fb3a159-67b9-401d-bc96-62dc8ea2d064",
+  "datestamp": "2020-07-08T16:31:03.633518", //UTC-0
+  "process": ""NIFI|TRANSLATE|ENRICHMENT|CLEANING|VALIDATION|STORAGE"
