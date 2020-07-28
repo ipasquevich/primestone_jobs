@@ -4,13 +4,14 @@ import time
 import os
 import json
 import random
-from pyspark.sql import SparkSession, DataFrame, Row
+import sys
+from pyspark.sql import SparkSession, DataFrame, Row,Window
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
-from pyspark.sql.functions import udf, struct
+from pyspark.sql.functions import udf, struct, lit,row_number, monotonically_increasing_id
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from urllib import request, parse
 from awsglue.transforms import *
 from awsglue.utils import getResolvedOptions
@@ -25,6 +26,14 @@ def enricher(df_union,s3_path_result,spark):
     df_union = df_union.withColumn("unitOfMeasure",df_union["unitOfMeasure"].cast(IntegerType()))
     df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
     df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
+
+    # Campos calculados
+    df_union = df_union.withColumn("idVdi",lit('')).withColumn("idenEvent",lit(''))\
+                .withColumn("identReading",row_number().over(Window.orderBy(monotonically_increasing_id()))-1)\
+                .withColumn("idDateYmd",lit('')).withColumn("idDateYw",lit(''))
+
+    fecha_hoy = date.today()
+    df_union = df_union.withColumn('dateCreation',lit(fecha_hoy))
     
     # Creacion del diccionario para el request
 
@@ -156,7 +165,7 @@ def enricher(df_union,s3_path_result,spark):
     # Con el json levantado necesito extraer los datos para cruzar con el dataframe que tenemos
     # Extraigo los valores del diccionario en dos listas
 
-    lista_relation_device = [[item["servicePointId"],item["deviceId"],item["result"],item["relationStartDate"]]
+    lista_relation_device = [[item["servicePointId"],item["deviceId"],item["result"]]
                             for item in req["relationDevice"]]
 
     lista_service_point_variable = [[item["readingType"],item["variableId"],item["servicePointId"],item["result"],
@@ -167,8 +176,7 @@ def enricher(df_union,s3_path_result,spark):
 
     schema_relation_device = StructType([StructField("servicePointId", StringType())\
                         ,StructField("deviceId", StringType())\
-                        ,StructField("result_rD", BooleanType())\
-                        ,StructField("relationStartDate", StringType())])
+                        ,StructField("result_rD", BooleanType())])
 
     df_relation_device = spark.createDataFrame(lista_relation_device,schema=schema_relation_device)
 
@@ -183,10 +191,6 @@ def enricher(df_union,s3_path_result,spark):
                             
     df_service_point_variable = spark.createDataFrame(lista_service_point_variable,schema=schema_service_point_variable)
 
-    #IMPORTANTE 
-    # elimino la columna relationStartDate porque en el paso siguiente hago el join con los valores enriquecidos
-    # y la vuelvo a obtener (con valores actualizados)
-    df_union = df_union.drop("relationStartDate")
 
     # hago un inner join de los dataframes creados con el dataframe original (enrichment)
     df_union = df_union.join(df_relation_device, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
@@ -271,15 +275,49 @@ def enricher(df_union,s3_path_result,spark):
     df_union = df_union.withColumn("readingUtcLocalTime", udf_object(struct([df_union[x] for x in df_union.columns])))
 
 
+    # Campos calculados parte 2
+    def fecha_numeric(valor):
+            try:
+                    return "".join(valor[:10].split("-"))
+            except TypeError:
+                    return ''
+
+    udf1 = udf(fecha_numeric,StringType())
+    df_union = df_union.withColumn('idDateYmd',udf1('readingUtcLocalTime'))
+
+
+    def semana(valor):
+            try:
+                    date_format = '%Y-%m-%d'
+                    fecha = datetime.strptime(valor[:10],date_format)
+                    an,sem,_ = fecha.isocalendar()
+                    return str(an)+str(sem)
+            except (ValueError,TypeError) :
+                    return ''
+
+    udf1 = udf(semana,StringType())
+    df_union = df_union.withColumn('idDateYw',udf1('readingUtcLocalTime'))
+
+
     # escribo los csv
-    df_union.write.format('csv').mode("overwrite").save(s3_path_result+"charlytest_enriched", header="true", emptyValue="")
+    df_union.write.format('csv').mode("overwrite").save(s3_path_result, header="true", emptyValue="")
 
 
     return df_union
     
 if __name__ == '__main__':
-    s3_filename="s3://primestone-trust-dev/tests/charlytest"
-    s3_path_result = "s3://primestone-trust-dev/tests/charlytest/"
+    args = getResolvedOptions(sys.argv,
+                        ['JOB_NAME',
+                        'file_name',
+                        'bucket_name'])
+                        
+    bucket = "s3://" + args['bucket_name'] + '/'
+    filename = args['file_name']
+    s3_path = bucket + filename
+    
+    output_bucket = 'primestone-trust-dev'
+    output_file = filename.split('|')[0] + "|enrich"
+    s3_path_result = "s3://" + output_bucket + '/'+ output_file 
     #glue_client = boto3.client("glue")
     #args = getResolvedOptions(sys.argv, ['JOB_NAME','WORKFLOW_NAME', 'WORKFLOW_RUN_ID'])
     #workflow_name = args['WORKFLOW_NAME']
@@ -289,9 +327,20 @@ if __name__ == '__main__':
 
     #s3_filename = workflow_params['translated_file']
     appName = "PySpark - enrichment"
-    spark = SparkSession.builder \
-    .appName(appName) \
-    .getOrCreate()
-    sc = SparkContext.getOrCreate()
-    df = spark.read.format('csv').options(header='true').load(s3_filename)
+    sc = SparkContext()
+    glueContext = GlueContext(sc)
+    spark = glueContext.spark_session
+    df = spark.read.format('csv').options(header='true').load(s3_path)
     enricher(df,s3_path_result,spark)
+    
+    client = boto3.client("glue",region_name='us-east-1')
+    client.start_job_run(
+        JobName= "job-clean",
+        Arguments={
+         '--file_name': output_file,
+         '--bucket_name': output_bucket
+        }
+    )
+    
+
+    
