@@ -6,7 +6,7 @@ from pyspark.sql.functions import lit, udf, struct, col, concat, explode, max, m
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,date
 from urllib import request, parse
 
 
@@ -14,7 +14,7 @@ from urllib import request, parse
 # BLOQUE CLEANING
 
 def cleaner(df_union, spark):
-        
+
         # Cambio el tipo de datos
         df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
         
@@ -76,20 +76,17 @@ def cleaner(df_union, spark):
 
                 df_union = df_union.filter((df_union.result_sPV == True) & (df_union.toStock == True))
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso1", header="true", emptyValue="")
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso1_banderas", header="true", emptyValue="")
 
 
         # PARTE 2: DIAS PASADOS FUTUROS
         # en base a la respuesta del request (req_config) tenemos que encontrar aquellas lecturas de los dias que correspondan
 
         if check_empty(df_union):
-
+                
                 # En los regustros donde el campo readingUtcLocalTime sea nulo, no vamos a poder hacer ninguna validacion, por lo que l
                 # los descartamos del df original y los agragamos a los logs
                 df_union = df_union.filter(df_union.readingUtcLocalTime.isNotNull())
-                df_logs_aux = df_union.filter(df_union.readingUtcLocalTime.isNull()).withColumn("Descripcion_log",lit("readingUtcLocalTime NULO"))
-                df_logs = df_logs.union(df_logs_aux).coalesce(1)
-
 
                 # creamos la funcion para aplicar a cada fila del df
                 hoy = datetime.today()
@@ -126,7 +123,7 @@ def cleaner(df_union, spark):
                 df_union = df_union.filter(df_union.lastReadDate_result == True)
                 df_union = df_union.drop("lastReadDate_result")
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso2", header="true", emptyValue="")
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso2_pasadoFuturo", header="true", emptyValue="")
 
         
         # PARTE 3: DUPLICADOS E INCONSISTENCIAS
@@ -188,8 +185,8 @@ def cleaner(df_union, spark):
 
                 df_union = df_final
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso3", header="true", emptyValue="")
-
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso3_duplicados", header="true", emptyValue="")
+        
         
 
 
@@ -204,13 +201,14 @@ def cleaner(df_union, spark):
                         .withColumn("editionReading", lit(""))\
                         .withColumn("editionValid", lit(""))
 
+                        
+
         # verificar si el df tiene datos de REGISTERS Y LOAD PROFILE READING
         if check_empty(df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "LOAD PROFILE READING"))):
         
 
                 df_nuevo = df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "LOAD PROFILE READING"))
 
-                max_ts = df_nuevo.agg(max('readingUtcLocalTime')).collect()[0][0]
                 min_ts = df_nuevo.agg(min('readingUtcLocalTime')).collect()[0][0]
 
                 # pongo todos los valores de version en 1, como si fueran nuevos, despues se van modificando
@@ -224,9 +222,10 @@ def cleaner(df_union, spark):
                 "../tests/Examples/original_modificado_glue.csv", header=True, mode="DROPMALFORMED"
                 )
 
+                df_orig = df_orig.filter(df_orig.readingUtcLocalTime >= min_ts)
 
 
-
+                df_orig.write.format('csv').mode("overwrite").save("./output/cleaned/trustdata_para_versionado", header="true", emptyValue="")
                 # ATHENA
 
 
@@ -310,7 +309,7 @@ def cleaner(df_union, spark):
                         df_final = df_final.withColumn("version_ref", udf_object(struct([df_final[x] for x in df_final.columns])))
 
                         # logs y df resultante en base a los valores devueltos por la funcion de versionamiento
-                        #df_logs = df_final.filter(df_final.version_ref.isNull()).withColumn("Descripcion_log",lit("Versionamiento duplicados"))
+                        df_logs_aux = df_final.filter(df_final.version_ref.isNull()).withColumn("Descripcion_log",lit("Versionamiento duplicados"))
 
                         df_final = df_final.filter(df_final.version_ref.isNotNull())
                         df_final = df_final.drop("version").withColumnRenamed("version_ref", 'version')
@@ -338,13 +337,13 @@ def cleaner(df_union, spark):
                 df_final = df_final.withColumn("usageReading", udf_object(struct([df_final[x] for x in df_final.columns])))
 
 
-                # agregar columnas de valor estimado y editado ??  columnas que tenga el df final ?
                 lista_columnas = ["servicePointId","readingType","variableId","deviceId","meteringType","readingUtcLocalTime","readingDateSource","readingLocalTime","dstStatus"
                                 ,"channel","unitOfMeasure","qualityCodesSystemId","qualityCodesCategorization","qualityCodesIndex","intervalSize","logNumber"
                                 ,"version","readingsValue","primarySource","readingsSource","owner","guidFile","estatus"
                                 ,"registersNumber","eventsCode","agentId","agentDescription","multiplier","deviceMaster","deviceDescription","deviceStatus"
                                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
-                                ,"deviceType","brand","model","usageReading","estimationReading","estimationValid","editionReading","editionValid"]
+                                ,"deviceType","brand","model","idVdi","identReading","idenEvent","idDateYmd","idDateYw",'dateCreation'
+                                ,"usageReading","estimationReading","estimationValid","editionReading","editionValid"]
 
                 df_final = df_final.select(*lista_columnas)
 
@@ -354,16 +353,14 @@ def cleaner(df_union, spark):
                 df_union = df_union.withColumn("usageReading",lit('')).select(*lista_columnas)
                 df_union = df_union.union(df_final).coalesce(1)
 
-                # logs
-                # ver agregar las columnas en los logs
-                #lista_columnas_logs = lista_columnas[:-1]
-                #lista_columnas_logs.append("Descripcion_log")
-                #df_logs = df_logs.select(*lista_columnas_logs)
+                # logs 
+                columnas_log = df_logs.columns
+                df_logs_aux = df_logs_aux.select(*columnas_log)
+                df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso4_versionado", header="true", emptyValue="")
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso4", header="true", emptyValue="")
-
-
+        
         # PARTE 5: RELLENO DE CEROS Y NULOS
 
         if check_empty(df_union.filter(df_union.readingType == "LOAD PROFILE READING")):
@@ -536,14 +533,15 @@ def cleaner(df_union, spark):
                 ,"version","readingsValue","primarySource","readingsSource","owner","guidFile","estatus"
                 ,"registersNumber","eventsCode","agentId","agentDescription","multiplier","deviceMaster","deviceDescription","deviceStatus"
                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
-                ,"deviceType","brand","model","validacion_intervalos","usageReading","estimationReading","estimationValid","editionReading","editionValid"]
+                ,"deviceType","brand","model","idVdi","identReading","idenEvent","idDateYmd","idDateYw",'dateCreation'
+                ,"validacion_intervalos","usageReading","estimationReading","estimationValid","editionReading","editionValid"]
 
                 df_load_profile = df_load_profile.select(*lista_columnas)
                 df_registers_events = df_registers_events.select(*lista_columnas)
 
                 df_union = df_load_profile.union(df_registers_events).coalesce(1)
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso5", header="true", emptyValue="")
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso5_rellenoNulosyCeros", header="true", emptyValue="")
         
 
 
@@ -582,7 +580,7 @@ def cleaner(df_union, spark):
 
                                 df_lp_failure = df_lp.filter(df_lp.validacion_intervalos.isNull())
                                 df_lp_failure = df_lp_failure.withColumn("usageValid",lit(False))\
-                                                        .withColumn("ValidationDetail",lit('{"Usage":{"IntervalsError":"Interval not exist"}}'))\
+                                                        .withColumn("ValidationDetail",lit("{'Usage':{'IntervalsError':'Interval not exist'}}"))\
                                                         .withColumn("IsGrouped",lit(False))
 
                                 df_lp = df_lp_success.union(df_lp_failure).coalesce(1)
@@ -610,16 +608,45 @@ def cleaner(df_union, spark):
                 ,"version","readingsValue","primarySource","readingsSource","owner","guidFile","estatus"
                 ,"registersNumber","eventsCode","agentId","agentDescription","multiplier","deviceMaster","deviceDescription","deviceStatus"
                 ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
-                ,"deviceType","brand","model","usageReading","usageValid","ValidationDetail","IsGrouped","estimationReading","estimationValid","editionReading","editionValid"]
+                ,"deviceType","brand","model","idVdi","identReading","idenEvent","idDateYmd","idDateYw",'dateCreation'
+                ,"usageReading","usageValid","ValidationDetail","IsGrouped","estimationReading","estimationValid","editionReading","editionValid"]
 
                 df_loadprofile = df_loadprofile.select(*lista_columnas)
                 df_registers_events = df_registers_events.select(*lista_columnas)
 
                 df_union = df_loadprofile.union(df_registers_events).coalesce(1)
 
-                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso6", header="true", emptyValue="")
+                df_union.write.format('csv').mode("overwrite").save("./output/cleaned/paso6_validacionIntervalos", header="true", emptyValue="")
+
+
+        # acomodo las columnas del df antes de escribirlo, y creo las columnas faltantes con valor vacio
+        lista_columnas = ["servicePointId","readingType","variableId","deviceId","meteringType","readingUtcLocalTime","readingDateSource","readingLocalTime","dstStatus"
+        ,"channel","unitOfMeasure","qualityCodesSystemId","qualityCodesCategorization","qualityCodesIndex","intervalSize","logNumber"
+        ,"version","readingsValue","primarySource","guidFile","estatus"
+        ,"registersNumber","eventsCode","agentId","agentDescription","multiplier","deviceMaster","deviceDescription","deviceStatus"
+        ,"serial","accountNumber","servicePointTimeZone","connectionType","relationStartDate","relationEndDate"
+        ,"deviceType","brand","model","idVdi","identReading","idenEvent","idDateYmd",'dateCreation'
+        ,"usageReading","usageValid","ValidationDetail","IsGrouped","estimationReading","estimationValid","editionReading","editionValid"
+        ,"owner","readingsSource","idDateYw"]
+
+        cols_df = set(df_union.columns)
+
+        for columna in set(lista_columnas).difference(cols_df):
+                df_union = df_union.withColumn(columna,lit(''))
+
+
+        df_union = df_union.select(*lista_columnas)
+
+        
+
+        # bloque obtencion de anio y semana para nomenclatura del archivo
+        fecha = date.today()
+        anio,sem,_ = fecha.isocalendar()
+        anio = str(anio)
+        sem = str(sem)
+        
 
         # escribir csv
-        df_union.write.format('csv').mode("overwrite").save("./output/cleaned/final", header="true", emptyValue="")
-
+        df_union.write.format('csv').mode("overwrite").save("./output/cleaned/final/"+anio+"/"+sem, header="true", emptyValue="")
+        df_logs.write.format('csv').mode("overwrite").save("./output/cleaned/removed_rows", header="true", emptyValue="")
         return df_union

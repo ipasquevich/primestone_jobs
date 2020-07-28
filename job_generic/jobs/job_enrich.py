@@ -4,23 +4,34 @@ import time
 import os
 import json
 import random
-from pyspark.sql import SparkSession, DataFrame, Row
+from pyspark.sql import SparkSession, DataFrame, Row,Window
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
-from pyspark.sql.functions import udf, struct
+from pyspark.sql.functions import lit, udf, struct, col, concat, explode, max, min,row_number, monotonically_increasing_id
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from urllib import request, parse
 
 
 def enricher(df_union,spark):
+
 
     # Cambio tipo de datos.
     df_union = df_union.withColumn("channel",df_union["channel"].cast(IntegerType()))
     df_union = df_union.withColumn("unitOfMeasure",df_union["unitOfMeasure"].cast(IntegerType()))
     df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
     df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
+
+
+    # Campos calculados
+    df_union = df_union.withColumn("idVdi",lit('')).withColumn("idenEvent",lit(''))\
+                .withColumn("identReading",row_number().over(Window.orderBy(monotonically_increasing_id()))-1)\
+                .withColumn("idDateYmd",lit('')).withColumn("idDateYw",lit(''))
+
+    fecha_hoy = date.today()
+    df_union = df_union.withColumn('dateCreation',lit(fecha_hoy))
+
 
 
     # Creacion del diccionario para el request
@@ -122,24 +133,10 @@ def enricher(df_union,spark):
 
 
 
-    # Guardo el request como json. COMENTAR ESTA PARTE PARA LO DE GLUE
-    #with open('enrich_request.json', 'w') as fp:
-    #    json.dump(dicc, fp, indent=4)
-    #print(df_.count() > 0)
-
-
-
 
     # BLOQUE DE ENRICH
 
-
-
-    # levanto el archivo json de referencia para configuracion, sirve para probar en caso de que no funcione el endpoint
-    #with open('respuesta_AMRDEF_sample_20200713.json') as json_file:
-    #    req = json.load(json_file)
-    #req = req["data"]
-
-    # bloque para el caso en que el json sea una respuesta directa de la api (no generado manualmente)
+    # bloque para el caso en que el json sea una respuesta directa de la api
 
     base_url = "http://80f56133-default-orchestra-c412-1531608832.us-east-1.elb.amazonaws.com/orchestrator/topology/set_up"
     
@@ -157,7 +154,7 @@ def enricher(df_union,spark):
     # Con el json levantado necesito extraer los datos para cruzar con el dataframe que tenemos
     # Extraigo los valores del diccionario en dos listas
 
-    lista_relation_device = [[item["servicePointId"],item["deviceId"],item["result"],item["relationStartDate"]]
+    lista_relation_device = [[item["servicePointId"],item["deviceId"],item["result"]]
                             for item in req["relationDevice"]]
 
     lista_service_point_variable = [[item["readingType"],item["variableId"],item["servicePointId"],item["result"],
@@ -168,10 +165,10 @@ def enricher(df_union,spark):
 
     schema_relation_device = StructType([StructField("servicePointId", StringType())\
                         ,StructField("deviceId", StringType())\
-                        ,StructField("result_rD", BooleanType())\
-                        ,StructField("relationStartDate", StringType())])
+                        ,StructField("result_rD", BooleanType())
+                        ])
 
-    df_relation_device = spark.createDataFrame(lista_relation_device,schema=schema_relation_device)
+    df_relation_device = spark.createDataFrame(lista_relation_device,schema=schema_relation_device).coalesce(1)
 
 
 
@@ -182,17 +179,13 @@ def enricher(df_union,spark):
                             ,StructField("toStock", BooleanType())\
                             ,StructField("lastReadDate", StringType())])
                             
-    df_service_point_variable = spark.createDataFrame(lista_service_point_variable,schema=schema_service_point_variable)
+    df_service_point_variable = spark.createDataFrame(lista_service_point_variable,schema=schema_service_point_variable).coalesce(1)
 
-    #IMPORTANTE 
-    # elimino la columna relationStartDate porque en el paso siguiente hago el join con los valores enriquecidos
-    # y la vuelvo a obtener (con valores actualizados)
-    df_union = df_union.drop("relationStartDate")
-
+    
     # hago un inner join de los dataframes creados con el dataframe original (enrichment)
     df_union = df_union.join(df_relation_device, on=['servicePointId',"deviceId"], how='inner').coalesce(1)
     df_union = df_union.join(df_service_point_variable, on=['variableId',"servicePointId","readingType"], how='inner').coalesce(1)
-
+    
 
     # bloque calculo de readingUtcLocalTime
     # hay que tomar la hora readingLocalTime y pasarla a la hora correspondiente en Utc = 0 para cada registro del df.
@@ -272,6 +265,32 @@ def enricher(df_union,spark):
     df_union = df_union.withColumn("readingUtcLocalTime", udf_object(struct([df_union[x] for x in df_union.columns])))
 
 
+
+    # Campos calculados parte 2
+    def fecha_numeric(valor):
+            try:
+                    return "".join(valor[:10].split("-"))
+            except TypeError:
+                    return ''
+
+    udf1 = udf(fecha_numeric,StringType())
+    df_union = df_union.withColumn('idDateYmd',udf1('readingUtcLocalTime'))
+
+
+    def semana(valor):
+            try:
+                    date_format = '%Y-%m-%d'
+                    fecha = datetime.strptime(valor[:10],date_format)
+                    an,sem,_ = fecha.isocalendar()
+                    return str(an)+str(sem)
+            except (ValueError,TypeError) :
+                    return ''
+
+    udf1 = udf(semana,StringType())
+    df_union = df_union.withColumn('idDateYw',udf1('readingUtcLocalTime'))
+
+
+        
     # escribo los csv
     df_union.write.format('csv').mode("overwrite").save("./output/enriched", header="true", emptyValue="")
 

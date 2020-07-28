@@ -4,9 +4,9 @@ import time
 import os
 import json
 import random
-from pyspark.sql import SparkSession, DataFrame, Row
+from pyspark.sql import SparkSession, DataFrame, Row,Window
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
-from pyspark.sql.functions import udf, struct, lit
+from pyspark.sql.functions import udf, struct, lit,row_number, monotonically_increasing_id
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
 from collections import OrderedDict
@@ -27,8 +27,9 @@ def enricher(df_union,s3_path_result,spark):
     df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
 
     # Campos calculados
-    df_union = df_union.withColumn("idVdi",lit('')).withColumn("identReading",lit('')).withColumn("idenEvent",lit(''))\
-                .withColumn("IdDateYmd",lit('')).withColumn("IdDateYw",lit(''))
+    df_union = df_union.withColumn("idVdi",lit('')).withColumn("idenEvent",lit(''))\
+                .withColumn("identReading",row_number().over(Window.orderBy(monotonically_increasing_id()))-1)\
+                .withColumn("idDateYmd",lit('')).withColumn("idDateYw",lit(''))
 
     fecha_hoy = date.today()
     df_union = df_union.withColumn('dateCreation',lit(fecha_hoy))
@@ -281,7 +282,7 @@ def enricher(df_union,s3_path_result,spark):
                     return ''
 
     udf1 = udf(fecha_numeric,StringType())
-    df_union = df_union.withColumn('IdDateYmd',udf1('readingUtcLocalTime'))
+    df_union = df_union.withColumn('idDateYmd',udf1('readingUtcLocalTime'))
 
 
     def semana(valor):
@@ -294,7 +295,7 @@ def enricher(df_union,s3_path_result,spark):
                     return ''
 
     udf1 = udf(semana,StringType())
-    df_union = df_union.withColumn('IdDateYw',udf1('readingUtcLocalTime'))
+    df_union = df_union.withColumn('idDateYw',udf1('readingUtcLocalTime'))
 
 
     # escribo los csv
