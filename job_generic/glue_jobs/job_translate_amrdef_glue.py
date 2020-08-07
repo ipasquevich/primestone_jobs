@@ -16,6 +16,107 @@ from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.dynamicframe import DynamicFrame
 
+
+# defino la funcion para los logs final del job
+def generacion_logs_fin(spark,df,category_status="processing_ended",category_process="Translate",source="TRANSLATE",
+                        target="sqs-logs",event_type="pap-log.business",data_message = " ",
+                        category_name="ReadingsProcessingLifecycle",user_id="System",log_level="INFO"):
+
+    # Get the service resource
+    client = boto3.client('sqs',region_name='us-east-1')
+
+    json_category = {}
+    
+    json_data = {}
+    
+    json_log = {}
+    
+    date_process = datetime.utcnow()
+    date_process_log = date_process.strftime("%Y/%m/%d %H:%M:%S,%f")[:-3]
+    
+    # bloque category
+    json_category["category_name"] = category_name
+    json_category["guid_file"] = df.head().guidFile
+    json_category["process"] = category_process
+    json_category["status"] = category_status
+    json_category["register_count"] = str(df.count())
+    json_category["event_timestamp"] = date_process_log
+    
+    # bloque data
+    json_data["message"] = data_message
+    json_data["logLevel"] = log_level
+    json_data["category"] = json_category
+    json_data["hes"] = df.head().readingsSource
+    
+    # bloque log
+    json_log["target"] = target
+    json_log["eventType"] = event_type
+    json_log["data"] = [json_data]
+    json_log["source"] = source
+    json_log["transactionId"] = df.head().guidFile
+    json_log["owner"] = df.head().owner
+    json_log["userId"] = user_id
+    json_log["datestamp"] = date_process_log
+    json_log["process"] = source
+    
+    # envio del msj a la cola
+    client.send_message(QueueUrl='https://queue.amazonaws.com/583767213990/sqs-logs',MessageBody=json.dumps(json_log))    
+
+
+# defino la funcion para el log al inicio del job
+def generacion_logs_inicio(xml_file_path,category_status="processing_started",category_process="Translate",source="TRANSLATE",
+                        target="sqs-logs",event_type="pap-log.business",data_message = " ",
+                        category_name="ReadingsProcessingLifecycle",user_id="System",log_level="INFO"):
+
+    # Get the service resource
+    client = boto3.client('sqs',region_name='us-east-1')
+    
+    guid = xml_file_path.split(".xml")[0]
+    guid = guid.split('/')[-1]
+    hes = xml_file_path.split("/")[4]
+    owner = xml_file_path.split("/")[3]
+
+    json_category = {}
+    
+    json_data = {}
+    
+    json_log = {}
+    
+    date_process = datetime.utcnow()
+    date_process_log = date_process.strftime("%Y/%m/%d %H:%M:%S,%f")[:-3]
+    
+    # bloque category
+    json_category["category_name"] = category_name
+    json_category["guid_file"] = guid
+    json_category["process"] = category_process
+    json_category["status"] = category_status
+    json_category["register_count"] = ' '
+    json_category["event_timestamp"] = date_process_log
+    
+    # bloque data
+    json_data["message"] = data_message
+    json_data["logLevel"] = log_level
+    json_data["category"] = json_category
+    json_data["hes"] = hes
+    
+    # bloque log
+    json_log["target"] = target
+    json_log["eventType"] = event_type
+    json_log["data"] = [json_data]
+    json_log["source"] = source
+    json_log["transactionId"] = guid
+    json_log["owner"] = owner
+    json_log["userId"] = user_id
+    json_log["datestamp"] = date_process_log
+    json_log["process"] = source
+    
+    # envio del msj a la cola
+    client.send_message(QueueUrl='https://queue.amazonaws.com/583767213990/sqs-logs',MessageBody=json.dumps(json_log))
+
+
+
+
+
 def translator(xml_file_path,s3_path_result,spark):
 
     # Cada <MeterReadings> ... <MeterReadings/> va ser tomado como un row en el dataframe df.
@@ -35,7 +136,6 @@ def translator(xml_file_path,s3_path_result,spark):
     df = spark.read.format("com.databricks.spark.xml").options(rootTag=root_tag).options(rowTag=row_tag).options(nullValue="").options(valueTag="_valueTag").option("columnNameOfCorruptRecord", "algunNombre") \
         .schema(schema)\
         .load(xml_file_path)
-
 
     '''
     Se crea un dataframe por cada tipo de lectura (MaxDemandData, DemandResetCount, etc.) porque es la forma más facil de tratarlos para la traducción.
@@ -2202,6 +2302,7 @@ def translator(xml_file_path,s3_path_result,spark):
     #                                    RunId=workflow_run_id)["RunProperties"]
 
     #workflow_params['translated_file']=
+    
     return df_union
 
 
@@ -2238,7 +2339,9 @@ if __name__=='__main__':
     logger.warn("TRANSLATING")
     logger.warn(s3_path)
     logger.warn("****************************************************")
-    translator(s3_path,s3_path_result,spark)
+    generacion_logs_inicio(s3_path)
+    df = translator(s3_path,s3_path_result,spark)
+    generacion_logs_fin(spark,df)
     logger.warn("****************************************************")
     logger.warn("****************************************************")
     logger.warn("STARTING ENRICH JOB")

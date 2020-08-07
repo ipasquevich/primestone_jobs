@@ -3,7 +3,7 @@ import sys
 import json
 import random
 from pyspark.sql import SparkSession, DataFrame, Row
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, BooleanType ,ArrayType,FloatType,TimestampType
 from pyspark.sql.functions import lit, udf, struct, col, concat, explode, max, min
 from pyspark import SparkContext ,SparkConf
 from functools import reduce 
@@ -755,6 +755,9 @@ def cleaner(df_union, s3_path_result, spark):
                 
                 
 
+        
+
+
 
 
         # acomodo las columnas del df antes de escribirlo, y creo las columnas faltantes con valor vacio
@@ -772,6 +775,20 @@ def cleaner(df_union, s3_path_result, spark):
         for columna in set(lista_columnas).difference(cols_df):
                 df_union = df_union.withColumn(columna,lit(''))
 
+
+        # cambio el tipo de dato de algunas columnas
+        df_union = df_union.withColumn("channel",df_union["channel"].cast(IntegerType()))\
+                        .withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))\
+                        .withColumn("version",df_union["version"].cast(IntegerType()))\
+                        .withColumn("idVdi",df_union["idVdi"].cast(IntegerType()))\
+                        .withColumn("identReading",df_union["identReading"].cast(IntegerType()))\
+                        .withColumn("idenEvent",df_union["idenEvent"].cast(IntegerType()))\
+                        .withColumn("idDateYmd",df_union["idDateYmd"].cast(IntegerType()))\
+                        .withColumn("idDateYw",df_union["idDateYw"].cast(IntegerType()))\
+                        .withColumn("readingsValue",df_union["readingsValue"].cast(FloatType()))\
+                        .withColumn("usageReading",df_union["usageReading"].cast(FloatType()))\
+                        .withColumn("estimationReading",df_union["estimationReading"].cast(FloatType()))\
+                        .withColumn("editionReading",df_union["editionReading"].cast(FloatType()))
 
         df_union = df_union.select(*lista_columnas)
 

@@ -25,6 +25,7 @@ def generacion_logs_jobs(spark,df,category_status,category_process="Cleaning",so
     
         # Get the service resource
         client = boto3.client('sqs', region_name='us-east-1')   
+        
         json_category = {}
 
         json_data = {}
@@ -68,6 +69,123 @@ def generacion_logs_jobs(spark,df,category_status,category_process="Cleaning",so
 # BLOQUE CLEANING
 
 def cleaner(df_union, s3_path_result, spark):
+
+
+
+        # funcion que nos va a servir para los logs de descarte de filas , para el relleno de ceros o nulos y para cada lectura en
+        # el bloque de validacion de intervalos.
+        def generacion_logs_readings(df,data_message=" ",
+                                source="CLEANING",category_process="Cleaning",target="sqs-logs",
+                                event_type="pap-log.business",category_name="ReadingsProcessing",user_id="System",
+                                cant_readings="",log_level="INFO"):
+                
+                # Get the service resource
+                client = boto3.client('sqs',region_name='us-east-1')
+
+                df = df.select("guidFile","readingType","variableId","readingUtcLocalTime","servicePointId",
+                                "deviceId","readingsSource","owner","categoryResult","categoryAction")
+                for row in df.rdd.collect():
+
+                        json_category = {}
+
+                        json_data = {}
+
+                        json_log = {}
+
+                        date_process = datetime.utcnow()
+                        date_process_log = date_process.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+
+                        # bloque category
+                        json_category["category_name"] = category_name
+                        json_category["guid_file"] = row.guidFile
+                        json_category["process"] = category_process
+                        json_category["action"] = row.categoryAction
+                        json_category["entity_1"] = row.readingType
+                        json_category["id_1"] = row.variableId
+                        json_category["reading_type"] = row.readingType
+                        json_category["start_timestamp"] = row.readingUtcLocalTime
+                        json_category["end_timestamp"] = row.readingUtcLocalTime
+                        json_category["service_point"] = row.servicePointId
+                        json_category["device"] = row.deviceId
+                        json_category["cant_readings"] = cant_readings
+                        json_category["result"] = row.categoryResult
+
+                        # bloque data
+                        json_data["message"] = data_message
+                        json_data["logLevel"] = log_level
+                        json_data["category"] = json_category
+                        json_data["hes"] = row.readingsSource
+
+                        # bloque log
+                        json_log["target"] = target
+                        json_log["eventType"] = event_type
+                        json_log["data"] = [json_data]
+                        json_log["source"] = source
+                        json_log["transactionId"] = row.guidFile
+                        json_log["owner"] = row.owner
+                        json_log["userId"] = user_id
+                        json_log["datestamp"] = date_process_log
+                        json_log["process"] = source
+
+                        client.send_message(QueueUrl='https://queue.amazonaws.com/583767213990/sqs-logs',MessageBody=json.dumps(json_log))
+
+
+
+        # funcion que nos va a servir para los logs de validacion generales
+        def generacion_logs_valid(df,max_ts,min_ts,category_result,cant_readings,
+                                source="VALIDATION",data_message=" ",category_action="Interval Validation",
+                                category_process="Cleaning",target="sqs-logs",event_type="pap-log.business",
+                                category_name="ReadingsProcessing",user_id="System",log_level="INFO"):
+                
+                # Get the service resource
+                client = boto3.client('sqs',region_name='us-east-1')
+
+                json_category = {}
+
+                json_data = {}
+
+                json_log = {}
+
+                date_process = datetime.utcnow()
+                date_process_log = date_process.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+
+                # bloque category
+                json_category["category_name"] = category_name
+                json_category["guid_file"] = df.head().guidFile
+                json_category["process"] = category_process
+                json_category["action"] = category_action
+                json_category["entity_1"] = df.head().readingType
+                json_category["id_1"] = df.head().variableId
+                json_category["reading_type"] = df.head().readingType
+                json_category["start_timestamp"] = min_ts
+                json_category["end_timestamp"] = max_ts
+                json_category["service_point"] = df.head().servicePointId
+                json_category["device"] = df.head().deviceId
+                json_category["cant_readings"] = cant_readings
+                json_category["result"] = category_result
+
+                # bloque data
+                json_data["message"] = data_message
+                json_data["logLevel"] = log_level
+                json_data["category"] = json_category
+                json_data["hes"] = df.head().readingsSource
+
+                # bloque log
+                json_log["target"] = target
+                json_log["eventType"] = event_type
+                json_log["data"] = [json_data]
+                json_log["source"] = source
+                json_log["transactionId"] = df.head().guidFile
+                json_log["owner"] = df.head().owner
+                json_log["userId"] = user_id
+                json_log["datestamp"] = date_process_log
+                json_log["process"] = source
+
+                client.send_message(QueueUrl='https://queue.amazonaws.com/583767213990/sqs-logs',MessageBody=json.dumps(json_log))
+
+
 
         #Cambio tipo de datos
         df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
@@ -175,16 +293,11 @@ def cleaner(df_union, s3_path_result, spark):
         # PARTE 1: FLAGS
         #descarte de banderas, si alguna es false, se descarta el registro (se guarda en otro dataframe que se 
         # va a usar para crear los logs)
-        print(df_union.head(1))
-        print(len(df_union.head(1)))
-        print(len(df_union.head(1))>0)
         if check_empty(df_union):
                 # primero revisamos por la bandera de estado de asociacion, si esta es falsa todos los registros con dicha condicion
                 # van a separarse el dataframe original para ir al dataframe de logs
 
-                df_logs = df_union.filter(df_union.result_rD == False).withColumn("Descripcion_log",lit("Estado de asociacion"))
-                df_logs.show()
-                df_logs.printSchema()
+                df_logs = df_union.filter(df_union.result_rD == False).withColumn("categoryAction",lit("Discard")).withColumn("categoryResult",lit("Discarded"))
 
                 df_union = df_union.filter(df_union.result_rD == True)
 
@@ -193,9 +306,11 @@ def cleaner(df_union, s3_path_result, spark):
                 # y lo concatenamos al df de logs
 
                 df_logs_aux = df_union.filter((df_union.result_sPV == False) | (df_union.toStock == False))\
-                .withColumn("Descripcion_log",lit("result variable - to stock "))
+                .withColumn("categoryAction",lit("Discard")).withColumn("categoryResult",lit("Discarded"))
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
+
+                #generacion_logs_readings(df_logs,"Discard","Discarded")
 
                 df_union = df_union.filter((df_union.result_sPV == True) & (df_union.toStock == True))
                 
@@ -238,8 +353,10 @@ def cleaner(df_union, s3_path_result, spark):
                 # y lo concatenamos al df de logs
 
                 df_logs_aux = df_union.filter(df_union.lastReadDate_result == False)\
-                .withColumn("Descripcion_log",lit("dias pasado-futuro"))\
+                .withColumn("categoryAction",lit("Discard lapse time")).withColumn("categoryResult",lit("Discarded"))\
                 .drop("lastReadDate_result")
+
+                #generacion_logs_readings(df_logs_aux,"Discard lapse time","Discarded")
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
@@ -274,7 +391,7 @@ def cleaner(df_union, s3_path_result, spark):
                                                                 ,col("readingLocalTime").alias("readingLocalTime_2")
                                                                 ,col("logNumber").alias("logNumber_2")
                                                                 ,col("readingsValue").alias("readingsValue_2") )
-                df_logs_aux = df_logs_aux.withColumn("Descripcion_log",lit("Duplicados"))
+                df_logs_aux = df_logs_aux.withColumn("categoryAction",lit("Discard")).withColumn("categoryResult",lit("Discarded"))
                 df_logs_aux = df_union.join(df_logs_aux, [(df_union.servicePointId == df_logs_aux.servicePointId_2)
                                                         , (df_union.deviceId == df_logs_aux.deviceId_2)
                                                         , (df_union.meteringType == df_logs_aux.meteringType_2)
@@ -288,6 +405,8 @@ def cleaner(df_union, s3_path_result, spark):
                 df_logs_aux = df_logs_aux.drop(*columns_to_drop)
 
                 df_union = df_union.dropDuplicates(['servicePointId','deviceId','meteringType','variableId','readingLocalTime','logNumber','readingsValue'])
+
+                #generacion_logs_readings(df_logs_aux,"Discard","Discarded")
 
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
@@ -306,7 +425,10 @@ def cleaner(df_union, s3_path_result, spark):
                                                         ,how = 'left_anti').coalesce(1)
                 # con esta linea salvamos la union entre nulos de pyspark, (union_unique.logNumber.eqNullSafe(df_duplicates.logNumber))
 
-                df_logs_aux = df_union.subtract(union_unique).withColumn("Descripcion_log",lit("Valores inconsitentes")).coalesce(1)
+                df_logs_aux = df_union.subtract(union_unique).withColumn("categoryAction",lit("Discard")).withColumn("categoryResult",lit("Discarded")).coalesce(1)
+                
+                #generacion_logs_readings(df_logs_aux,"Discard","Discarded")
+                
                 df_logs = df_logs.union(df_logs_aux).coalesce(1)
 
                 df_union = df_final
@@ -325,6 +447,11 @@ def cleaner(df_union, s3_path_result, spark):
                         .withColumn("estimationValid", lit(""))\
                         .withColumn("editionReading", lit(""))\
                         .withColumn("editionValid", lit(""))
+
+        # elimino columnas de logs que no me sirven
+        columns_to_drop = "result_rD,result_sPV,toStock,lastReadDate".split(',')
+        df_logs = df_logs.drop(*columns_to_drop)
+
 
         # verificar si el df tiene datos de REGISTERS Y LOAD PROFILE READING
         if check_empty(df_union.filter((df_union.readingType == "REGISTERS") | (df_union.readingType == "LOAD PROFILE READING"))):
@@ -431,7 +558,14 @@ def cleaner(df_union, s3_path_result, spark):
                         df_final = df_final.withColumn("version_ref", udf_object(struct([df_final[x] for x in df_final.columns])))
 
                         # logs y df resultante en base a los valores devueltos por la funcion de versionamiento
-                        df_logs_aux = df_final.filter(df_final.version_ref.isNull()).withColumn("Descripcion_log",lit("Versionamiento duplicados"))
+                        df_logs_aux = df_final.filter(df_final.version_ref.isNull()).withColumn("categoryAction",lit("Discard")).withColumn("categoryResult",lit("Discarded"))
+                        columnas_log = df_logs.columns
+                        df_logs_aux = df_logs_aux.select(*columnas_log)
+
+                        #generacion_logs_readings(df_logs_aux,"Discard","Discarded")
+
+                        df_logs = df_logs.union(df_logs_aux).coalesce(1)
+
 
                         df_final = df_final.filter(df_final.version_ref.isNotNull())
                         df_final = df_final.drop("version").withColumnRenamed("version_ref", 'version')
@@ -475,10 +609,6 @@ def cleaner(df_union, s3_path_result, spark):
                 df_union = df_union.withColumn("usageReading",lit('')).select(*lista_columnas)
                 df_union = df_union.union(df_final).coalesce(1)
 
-                # logs
-                columnas_log = df_logs.columns
-                df_logs_aux = df_logs_aux.select(*columnas_log)
-                df_logs = df_logs.union(df_logs_aux).coalesce(1)
                 
                 df_union.write.format('csv').mode("overwrite").save(s3_path_result +"|final/paso4_versionado", header="true", emptyValue="")
 
@@ -525,6 +655,12 @@ def cleaner(df_union, s3_path_result, spark):
                         else:
                                 return row.readingsValue_ref
 
+                # funcion para rellenar el campo logs.
+                def func_logs(row):
+                        if (row.quality_flag in lista_apagon) and (not row.referencia):
+                                return True
+                        else:
+                                return None
 
                 # creo funcion que va a rellenar en otra columna (a la que vamos a llamar validacion_intervalos) con nulo cuando el valor del
                 # campo quality_flag no sea bandera de apagon, y un 1 cuando la bandera indique apagon
@@ -620,8 +756,10 @@ def cleaner(df_union, s3_path_result, spark):
                         
                         if ceros:
                                 relleno = "0"
+                                action_log = "ZeroFilling"
                         else:
                                 relleno = None
+                                action_log = "NullFilling"
 
 
                         # Create your UDF object (which accepts func_apagon  python function)
@@ -633,12 +771,24 @@ def cleaner(df_union, s3_path_result, spark):
                         udf_object = udf(func_apagon_intervalos, StringType())
                         df_lp = df_lp.withColumn("validacion_intervalos", udf_object(struct([df_lp[x] for x in df_lp.columns])))
 
+                        # Create your UDF object (which accepts func_logs python function)
+                        udf_object = udf(func_logs, BooleanType())
+                        df_lp = df_lp.withColumn("logs", udf_object(struct([df_lp[x] for x in df_lp.columns])))
+
+                        df_logs_aux = df_lp.filter(df_lp.logs.isNotNull()).withColumn("categoryAction",lit(action_log)).withColumn("categoryResult",lit("Filled"))
+                        columnas_log = df_logs.columns
+                        df_logs_aux = df_logs_aux.select(*columnas_log)
+                        df_logs = df_logs.union(df_logs_aux).coalesce(1)
+
+
+                        #generacion_logs_readings(df_logs_fill,action_log,"Filled")
+
 
                         # Elimino algunas columnas y renombro otras para mantener el formato de salida esperado
 
                         columns_to_drop = ['readingUtcLocalTime_ref', 'complete_interval_ref', 'readingUtcLocalTime', 'readingDateSource',
                                                 'readingLocalTime', "qualityCodesSystemId" ,"qualityCodesCategorization", 'qualityCodesIndex',
-                                                "readingsValue", "referencia" , "quality_flag"]
+                                                "readingsValue", "referencia" , "quality_flag","logs"]
                         df_lp = df_lp.drop(*columns_to_drop)
 
 
@@ -698,8 +848,10 @@ def cleaner(df_union, s3_path_result, spark):
                         df_lp = df_loadprofile.filter(df_loadprofile.variableId == variable)
 
                         # obtengo los limites de los tiempos y los paso a timestamp
-                        max_ts = datetime.strptime((df_lp.agg(max('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
-                        min_ts = datetime.strptime((df_lp.agg(min('readingUtcLocalTime')).collect()[0][0]),"%Y-%m-%d %H:%M:%S")
+                        max_ts_str = df_lp.agg(max('readingUtcLocalTime')).collect()[0][0]
+                        min_ts_str = df_lp.agg(min('readingUtcLocalTime')).collect()[0][0]
+                        max_ts = datetime.strptime(max_ts_str,"%Y-%m-%d %H:%M:%S")
+                        min_ts = datetime.strptime(min_ts_str,"%Y-%m-%d %H:%M:%S")
                         delta = max_ts - min_ts
 
                         # interval indica el intervalo en minutos
@@ -707,9 +859,16 @@ def cleaner(df_union, s3_path_result, spark):
                         mins = delta.seconds//60
                         cant_lecturas = (mins//interval) + 1
 
-                        if df_lp.filter(df_lp.validacion_intervalos.isNotNull()).count() == cant_lecturas:
+                        cant_lecturas_real = df_lp.filter(df_lp.validacion_intervalos.isNotNull()).count()
+
+                        if cant_lecturas_real == cant_lecturas:
+                                generacion_logs_valid(df_lp,max_ts_str,min_ts_str,"Successful",cant_lecturas_real)
                                 df_lp = df_lp.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
                         else:
+                                # llamo funcion logs con failed , cant_readings = cant_lecturas - cant_lecturas_real
+                                dif_lecturas = cant_lecturas-cant_lecturas_real
+                                generacion_logs_valid(df_lp,max_ts_str,min_ts_str,"Failed",dif_lecturas)
+
                                 df_lp_success = df_lp.filter(df_lp.validacion_intervalos.isNotNull())
                                 df_lp_success = df_lp_success.withColumn("usageValid",lit(True)).withColumn("ValidationDetail",lit("")).withColumn("IsGrouped",lit(False))
 
@@ -785,12 +944,15 @@ def cleaner(df_union, s3_path_result, spark):
         # escribir csv
         df_union.write.format('csv').mode("overwrite").save(s3_path_result +"|final/final", header="true", emptyValue="")
         df_logs.write.format('csv').mode("overwrite").save(s3_path_result+"|cleaning_dump", header="true", emptyValue="")
-        
+
+
         schema = df_union.schema.json()
         s3 = boto3.resource('s3')
-        object = s3.Object('primestone-raw-dev', 'schema_final.json')
+        object = s3.Object('primestone-raw-dev', 'schema_final_alllogs.json')
         object.put(Body=json.dumps(schema).encode('utf-8'))
-        
+
+        generacion_logs_readings(df_logs)
+
         return df_union
         
         
@@ -821,6 +983,6 @@ if __name__ == '__main__':
     spark = glueContext.spark_session
     df = spark.read.format('csv').options(header='true').load(s3_path)
     
-    #generacion_logs_jobs(spark,df,"processing_started")
+    generacion_logs_jobs(spark,df,"processing_started")
     df = cleaner(df,s3_path_result,spark)
-    #generacion_logs_jobs(spark,df,"processing_ended")
+    generacion_logs_jobs(spark,df,"processing_ended")

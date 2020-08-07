@@ -19,6 +19,58 @@ from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.dynamicframe import DynamicFrame
 
+
+
+# defino la funcion para los logs a nivel job
+def generacion_logs_jobs(spark,df,category_status,category_process="Enrich",source="ENRICHMENT",
+                        target="sqs-logs",event_type="pap-log.business",data_message = " ",
+                        category_name="ReadingsProcessingLifecycle",user_id="System",log_level="INFO"):
+    
+    # Get the service resource
+    client = boto3.client('sqs', region_name='us-east-1')
+
+    json_category = {}
+    
+    json_data = {}
+    
+    json_log = {}
+    
+    date_process = datetime.utcnow()
+    date_process_log = date_process.strftime("%Y/%m/%d %H:%M:%S,%f")[:-3]
+    
+    # bloque category
+    json_category["category_name"] = category_name
+    json_category["guid_file"] = df.head().guidFile
+    json_category["process"] = category_process
+    json_category["status"] = category_status
+    json_category["register_count"] = str(df.count())
+    json_category["event_timestamp"] = date_process_log
+    
+    # bloque data
+    json_data["message"] = data_message
+    json_data["logLevel"] = log_level
+    json_data["category"] = json_category
+    json_data["hes"] = df.head().readingsSource
+    
+    # bloque log
+    json_log["target"] = target
+    json_log["eventType"] = event_type
+    json_log["data"] = [json_data]
+    json_log["source"] = source
+    json_log["transactionId"] = df.head().guidFile
+    json_log["owner"] = df.head().owner
+    json_log["userId"] = user_id
+    json_log["datestamp"] = date_process_log
+    json_log["process"] = source
+    
+    # envio del msj a la cola
+    client.send_message(QueueUrl='https://queue.amazonaws.com/583767213990/sqs-logs',MessageBody=json.dumps(json_log))
+
+
+
+
+
+
 def enricher(df_union,s3_path_result,spark):
 
     # Cambio tipo de datos.
@@ -26,6 +78,7 @@ def enricher(df_union,s3_path_result,spark):
     df_union = df_union.withColumn("unitOfMeasure",df_union["unitOfMeasure"].cast(IntegerType()))
     df_union = df_union.withColumn("intervalSize",df_union["intervalSize"].cast(IntegerType()))
     df_union = df_union.withColumn("logNumber",df_union["logNumber"].cast(IntegerType()))
+    df_union = df_union.withColumn("version",lit(1))
 
     # Campos calculados
     df_union = df_union.withColumn("idVdi",lit('')).withColumn("idenEvent",lit(''))\
@@ -301,8 +354,7 @@ def enricher(df_union,s3_path_result,spark):
 
     # escribo los csv
     df_union.write.format('csv').mode("overwrite").save(s3_path_result, header="true", emptyValue="")
-
-
+    
     return df_union
     
 if __name__ == '__main__':
@@ -331,8 +383,9 @@ if __name__ == '__main__':
     glueContext = GlueContext(sc)
     spark = glueContext.spark_session
     df = spark.read.format('csv').options(header='true').load(s3_path)
-    enricher(df,s3_path_result,spark)
-    
+    generacion_logs_jobs(spark,df,"processing_started")
+    df = enricher(df,s3_path_result,spark)
+    generacion_logs_jobs(spark,df,"processing_ended")
     client = boto3.client("glue",region_name='us-east-1')
     client.start_job_run(
         JobName= "job-clean",
@@ -343,4 +396,3 @@ if __name__ == '__main__':
     )
     
 
-    
